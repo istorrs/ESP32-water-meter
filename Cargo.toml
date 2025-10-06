@@ -19,6 +19,7 @@ embedded-svc = "0.28"
 # Utilities
 log = "0.4"
 anyhow = "1.0"
+heapless = "0.8"
 
 [build-dependencies]
 embuild = "0.33"
