@@ -1,0 +1,40 @@
+[package]
+name = "esp32-water-meter"
+version = "0.1.0"
+authors = ["Water Meter Team"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "ESP32 water meter MTU interface with Embassy async framework"
+
+[dependencies]
+# ESP32 HAL - using 1.0 RC for Xtensa fixes
+esp-hal = { version = "1.0.0-rc.0", features = ["esp32"] }
+esp-backtrace = { version = "0.14", features = ["esp32", "panic-handler", "exception-handler", "println"] }
+esp-println = { version = "0.11", features = ["esp32"] }
+
+# Embassy async framework
+embassy-executor = { version = "0.6.0", features = ["arch-xtensa", "executor-thread"] }
+embassy-time = "0.3.2"
+embassy-sync = "0.6"
+
+# Embedded HAL
+embedded-hal = "1.0"
+embedded-hal-async = "1.0"
+embedded-io = "0.6"
+embedded-io-async = "0.6"
+
+# Utilities
+heapless = { version = "0.8", default-features = false }
+
+[profile.dev]
+# Rust debug is too slow - always build with some optimization
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false
