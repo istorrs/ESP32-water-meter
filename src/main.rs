@@ -1,24 +1,24 @@
-#![no_std]
-#![no_main]
+use esp_idf_hal::delay::FreeRtos;
+use esp_idf_hal::peripherals::Peripherals;
+use esp_idf_svc::sys as sys;
 
-use esp_backtrace as _;
-use esp_hal::{
-    delay::Delay,
-    prelude::*,
-};
-use esp_println::println;
+fn main() -> anyhow::Result<()> {
+    // Initialize ESP-IDF system services
+    sys::link_patches();
 
-#[entry]
-fn main() -> ! {
-    let peripherals = esp_hal::init(esp_hal::Config::default());
+    // Initialize logging
+    esp_idf_svc::log::EspLogger::initialize_default();
 
-    println!("ESP32 Water Meter MTU Interface");
-    println!("Initializing...");
+    log::info!("ESP32 Water Meter MTU Interface");
+    log::info!("Initializing...");
 
-    let delay = Delay::new();
+    let peripherals = Peripherals::take()?;
+
+    log::info!("✅ ESP32 initialized with ESP-IDF");
+    log::info!("Peripherals available for GPIO configuration");
 
     loop {
-        println!("Hello from ESP32!");
-        delay.delay_millis(1000);
+        log::info!("Hello from ESP32!");
+        FreeRtos::delay_ms(1000);
     }
 }

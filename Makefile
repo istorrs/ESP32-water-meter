@@ -1,4 +1,4 @@
-# Makefile for ESP32 Water Meter MTU Interface
+# Makefile for ESP32 Water Meter MTU Interface (ESP-IDF)
 
 .PHONY: all build flash release flash-release monitor clean help
 
@@ -7,23 +7,23 @@ all: build
 
 # Build (debug)
 build:
-	@echo "🔧 Building ESP32 MTU app (debug)..."
-	@bash -c "source ~/export-esp.sh && cargo +esp build -Zbuild-std=core,alloc"
+	@echo "🔧 Building ESP32 MTU app (debug) with ESP-IDF..."
+	cargo build
 
 # Build (release)
 release:
-	@echo "🔧 Building ESP32 MTU app (release)..."
-	@bash -c "source ~/export-esp.sh && cargo +esp build --release -Zbuild-std=core,alloc"
+	@echo "🔧 Building ESP32 MTU app (release) with ESP-IDF..."
+	cargo build --release
 
 # Flash (debug)
 flash: build
 	@echo "📱 Flashing ESP32 MTU app (debug)..."
-	@bash -c "source ~/export-esp.sh && espflash flash --monitor target/xtensa-esp32-none-elf/debug/esp32-water-meter"
+	cargo run
 
 # Flash (release)
 flash-release: release
 	@echo "📱 Flashing ESP32 MTU app (release)..."
-	@bash -c "source ~/export-esp.sh && espflash flash --monitor target/xtensa-esp32-none-elf/release/esp32-water-meter"
+	cargo run --release
 
 # Monitor
 monitor:
@@ -37,7 +37,7 @@ clean:
 
 # Help
 help:
-	@echo "ESP32 Water Meter MTU Interface - Available Commands:"
+	@echo "ESP32 Water Meter MTU Interface (ESP-IDF) - Available Commands:"
 	@echo ""
 	@echo "  make build         - Build debug version"
 	@echo "  make release       - Build release version"
@@ -47,5 +47,4 @@ help:
 	@echo "  make clean         - Clean build artifacts"
 	@echo "  make help          - Show this help"
 	@echo ""
-	@echo "Prerequisites:"
-	@echo "  source ~/export-esp.sh  # Must be run before building"
+	@echo "Note: ESP-IDF will be automatically downloaded and configured on first build"
