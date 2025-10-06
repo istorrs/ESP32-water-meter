@@ -1,0 +1,2 @@
+# Increase main task stack size for MTU operations
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

@@ -5,5 +5,5 @@
 pub mod mtu;
 pub mod meter;
 
-pub use mtu::{MtuConfig, MtuError, MtuResult, GpioMtu, GpioMtuTimer, UartFraming};
+pub use mtu::{MtuConfig, MtuError, MtuResult, GpioMtu, GpioMtuTimer, GpioMtuTimerV2, UartFraming};
 pub use meter::{MeterConfig, MeterType, MeterHandler};

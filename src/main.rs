@@ -1,4 +1,4 @@
-use esp32_water_meter::mtu::{GpioMtuTimer, MtuConfig};
+use esp32_water_meter::mtu::{GpioMtuTimerV2, MtuConfig};
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::gpio::PinDriver;
 use esp_idf_hal::peripherals::Peripherals;
@@ -31,15 +31,16 @@ fn main() -> anyhow::Result<()> {
     let mut config = MtuConfig::default();
     config.baud_rate = 1200; // 1200 baud for water meter
 
-    log::info!("Creating hardware timer-based MTU instance:");
+    log::info!("Creating hardware timer-based MTU (ISR->Task pattern):");
     log::info!("  Baud rate: {} baud", config.baud_rate);
     log::info!("  Bit duration: {} μs", config.bit_duration_micros());
     log::info!("  Timer frequency: {} Hz (2x baud for HIGH/LOW)", config.baud_rate * 2);
+    log::info!("  Pattern: Timer ISR -> FreeRTOS Task -> GPIO");
 
-    let mtu = GpioMtuTimer::new(config);
+    let mtu = GpioMtuTimerV2::new(config);
 
     log::info!("✅ MTU initialized successfully");
-    log::info!("Starting hardware timer-based MTU operation for 10 seconds...");
+    log::info!("Starting ISR->Task timer operation for 10 seconds...");
 
     // Run a test MTU operation with hardware timer
     match mtu.run_mtu_operation_with_timer(
@@ -49,7 +50,7 @@ fn main() -> anyhow::Result<()> {
         10,
     ) {
         Ok(_) => {
-            let (success, corrupt, cycles) = mtu.get_stats();
+            let (_success, _corrupt, cycles) = mtu.get_stats();
             log::info!("✅ MTU timer operation completed successfully");
             log::info!("   Total clock cycles: {}", cycles);
             log::info!("   Expected: ~{} cycles at {} baud", 1200 * 10, 1200);
