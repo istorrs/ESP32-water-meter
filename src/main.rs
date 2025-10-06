@@ -1,6 +1,6 @@
-use esp32_water_meter::mtu::{GpioMtu, MtuConfig};
+use esp32_water_meter::mtu::{GpioMtuTimer, MtuConfig};
 use esp_idf_hal::delay::FreeRtos;
-use esp_idf_hal::gpio::{PinDriver, Input, Output};
+use esp_idf_hal::gpio::PinDriver;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_svc::sys as sys;
 
@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     // Initialize logging
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    log::info!("ESP32 Water Meter MTU Interface");
+    log::info!("ESP32 Water Meter MTU Interface (Timer-based)");
     log::info!("Initializing...");
 
     let peripherals = Peripherals::take()?;
@@ -31,20 +31,28 @@ fn main() -> anyhow::Result<()> {
     let mut config = MtuConfig::default();
     config.baud_rate = 1200; // 1200 baud for water meter
 
-    log::info!("Creating MTU instance with config:");
+    log::info!("Creating hardware timer-based MTU instance:");
     log::info!("  Baud rate: {} baud", config.baud_rate);
     log::info!("  Bit duration: {} μs", config.bit_duration_micros());
-    log::info!("  Power-up delay: {} ms", config.power_up_delay_ms);
+    log::info!("  Timer frequency: {} Hz (2x baud for HIGH/LOW)", config.baud_rate * 2);
 
-    let mtu = GpioMtu::new(config);
+    let mtu = GpioMtuTimer::new(config);
 
     log::info!("✅ MTU initialized successfully");
-    log::info!("Starting MTU operation for 10 seconds...");
+    log::info!("Starting hardware timer-based MTU operation for 10 seconds...");
 
-    // Run a test MTU operation
-    match mtu.run_mtu_operation(&mut clock_pin, &mut data_pin, 10) {
+    // Run a test MTU operation with hardware timer
+    match mtu.run_mtu_operation_with_timer(
+        &mut clock_pin,
+        &mut data_pin,
+        peripherals.timer00,
+        10,
+    ) {
         Ok(_) => {
-            log::info!("✅ MTU operation completed successfully");
+            let (success, corrupt, cycles) = mtu.get_stats();
+            log::info!("✅ MTU timer operation completed successfully");
+            log::info!("   Total clock cycles: {}", cycles);
+            log::info!("   Expected: ~{} cycles at {} baud", 1200 * 10, 1200);
         }
         Err(e) => {
             log::error!("❌ MTU operation failed: {:?}", e);
