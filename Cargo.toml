@@ -8,9 +8,9 @@ description = "ESP32 water meter MTU interface with ESP-IDF"
 
 [dependencies]
 # ESP-IDF (std approach - mature for ESP32)
-esp-idf-svc = { version = "0.49", default-features = false }
-esp-idf-hal = "0.44"
-esp-idf-sys = { version = "0.35" }
+esp-idf-svc = { version = "0.51", default-features = false, features = ["alloc"] }
+esp-idf-hal = "0.45"
+esp-idf-sys = { version = "0.36" }
 
 # Embedded HAL
 embedded-hal = "0.2"
@@ -21,7 +21,7 @@ log = "0.4"
 anyhow = "1.0"
 
 [build-dependencies]
-embuild = "0.32"
+embuild = "0.33"
 
 [profile.dev]
 # Rust debug is too slow - always build with some optimization
