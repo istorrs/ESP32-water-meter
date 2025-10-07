@@ -2,13 +2,13 @@ use super::config::MtuConfig;
 use super::error::{MtuError, MtuResult};
 use super::uart_framing::{extract_char_from_frame, UartFrame};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use esp_idf_hal::gpio::{Input, Output, PinDriver, Pin};
-use esp_idf_hal::timer::{TimerDriver, config::Config as TimerConfig, TIMER00};
+use esp_idf_hal::gpio::{Input, Output, Pin, PinDriver};
 use esp_idf_hal::task::notification::Notification;
+use esp_idf_hal::timer::{config::Config as TimerConfig, TimerDriver, TIMER00};
 use heapless::String;
 use std::num::NonZeroU32;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{channel, Sender, Receiver};
 
 /// Commands that can be sent to the MTU background thread
 #[derive(Debug, Clone)]
@@ -105,7 +105,7 @@ impl GpioMtuTimerV2 {
                 let mut timer_driver: TimerDriver<'static> = unsafe {
                     core::mem::transmute(
                         TimerDriver::new(timer_peripheral, &timer_config)
-                            .expect("Failed to create timer driver")
+                            .expect("Failed to create timer driver"),
                     )
                 };
                 log::info!("MTU: Timer driver created");
@@ -120,14 +120,16 @@ impl GpioMtuTimerV2 {
                 // Subscribe to timer ISR once with persistent references
                 // Safety: Only accesses atomics and notification, both are Send+Sync
                 unsafe {
-                    timer_driver.subscribe(move || {
-                        let cycle = cycles.fetch_add(1, Ordering::Relaxed);
-                        // 4 phases per bit: 0=HIGH, 1=WAIT, 2=LOW, 3=SAMPLE
-                        let phase = (cycle % 4) as u32;
-                        if let Some(bits) = NonZeroU32::new(phase + 1) {
-                            notifier.notify_and_yield(bits);
-                        }
-                    }).expect("Failed to subscribe to timer ISR");
+                    timer_driver
+                        .subscribe(move || {
+                            let cycle = cycles.fetch_add(1, Ordering::Relaxed);
+                            // 4 phases per bit: 0=HIGH, 1=WAIT, 2=LOW, 3=SAMPLE
+                            let phase = (cycle % 4) as u32;
+                            if let Some(bits) = NonZeroU32::new(phase + 1) {
+                                notifier.notify_and_yield(bits);
+                            }
+                        })
+                        .expect("Failed to subscribe to timer ISR");
                 }
                 log::info!("MTU: Timer ISR subscription created (persistent)");
 
@@ -200,7 +202,10 @@ impl GpioMtuTimerV2 {
         let uart_config = config.clone();
         drop(config);
 
-        log::info!("MTU: Starting ISR->Task timer operation for {} seconds", duration_secs);
+        log::info!(
+            "MTU: Starting ISR->Task timer operation for {} seconds",
+            duration_secs
+        );
         log::info!("MTU: Baud rate: {} Hz", baud_rate);
 
         // Set running flag BEFORE spawning UART task so it doesn't exit immediately
@@ -246,10 +251,16 @@ impl GpioMtuTimerV2 {
         let alarm_ticks = timer.tick_hz() / timer_freq_hz as u64;
 
         log::info!("MTU: Timer tick rate: {} Hz", timer.tick_hz());
-        log::info!("MTU: Alarm every {} ticks ({} Hz)", alarm_ticks, timer_freq_hz);
+        log::info!(
+            "MTU: Alarm every {} ticks ({} Hz)",
+            alarm_ticks,
+            timer_freq_hz
+        );
 
         // Configure and start timer (ISR already subscribed in thread loop)
-        timer.set_alarm(alarm_ticks).map_err(|_| MtuError::GpioError)?;
+        timer
+            .set_alarm(alarm_ticks)
+            .map_err(|_| MtuError::GpioError)?;
         timer.enable_interrupt().map_err(|_| MtuError::GpioError)?;
         timer.enable_alarm(true).map_err(|_| MtuError::GpioError)?;
         timer.enable(true).map_err(|_| MtuError::GpioError)?;
@@ -266,7 +277,9 @@ impl GpioMtuTimerV2 {
         let mut zeros_count = 0usize;
 
         // Run until timeout OR until we receive a complete message (like nRF line 367)
-        while start.elapsed().as_secs() < duration_secs && !self.message_complete.load(Ordering::Relaxed) {
+        while start.elapsed().as_secs() < duration_secs
+            && !self.message_complete.load(Ordering::Relaxed)
+        {
             // Wait for notification from ISR (1 tick timeout ~= 1ms)
             if let Some(bitset) = notification.wait(1) {
                 handled_count += 1;
@@ -321,7 +334,6 @@ impl GpioMtuTimerV2 {
                 last_log_time = std::time::Instant::now();
 
                 let elapsed = start.elapsed().as_secs();
-                let bit = self.last_bit.load(Ordering::Relaxed);
 
                 log::info!(
                     "MTU: {}/{}s - ISR: {} ticks, Task: {} handled, {} ticks/sec, Sampled: {} (1s:{}, 0s:{})",
@@ -375,9 +387,16 @@ impl GpioMtuTimerV2 {
         log::info!("  ISR generated: {} timer ticks", total_cycles);
         log::info!("  Task handled: {} GPIO updates", handled_count);
         log::info!("  Data sampled: {} times", sample_count);
-        log::info!("  Bit distribution: {} ones, {} zeros ({:.1}% high)",
-                   ones_count, zeros_count, (ones_count as f32 / sample_count as f32) * 100.0);
-        log::info!("  Efficiency: {:.1}%", (handled_count as f32 / total_cycles as f32) * 100.0);
+        log::info!(
+            "  Bit distribution: {} ones, {} zeros ({:.1}% high)",
+            ones_count,
+            zeros_count,
+            (ones_count as f32 / sample_count as f32) * 100.0
+        );
+        log::info!(
+            "  Efficiency: {:.1}%",
+            (handled_count as f32 / total_cycles as f32) * 100.0
+        );
 
         if let Some(msg) = received_message {
             log::info!("  Received message: '{}'", msg.as_str());
@@ -429,7 +448,10 @@ impl GpioMtuTimerV2 {
         }
 
         if idle_count >= MIN_IDLE_BITS {
-            log::info!("UART: Idle line detected ({} consecutive 1-bits), synchronized!", idle_count);
+            log::info!(
+                "UART: Idle line detected ({} consecutive 1-bits), synchronized!",
+                idle_count
+            );
         } else {
             log::warn!("UART: Failed to detect idle line, proceeding anyway");
         }
@@ -474,7 +496,10 @@ impl GpioMtuTimerV2 {
 
             // Receive remaining bits with timeout
             let mut bits_received = 1;
-            while bits_received < frame_size && running.load(Ordering::Relaxed) && !message_complete.load(Ordering::Relaxed) {
+            while bits_received < frame_size
+                && running.load(Ordering::Relaxed)
+                && !message_complete.load(Ordering::Relaxed)
+            {
                 match bit_receiver.recv_timeout(std::time::Duration::from_secs(2)) {
                     Ok(bit) => {
                         let _ = frame_bits.push(bit);
@@ -512,7 +537,10 @@ impl GpioMtuTimerV2 {
                             // Check for end of message (carriage return)
                             if ch == '\r' {
                                 let message: String<256> = received_chars.iter().collect();
-                                log::info!("UART: Complete message received: '{}'", message.as_str());
+                                log::info!(
+                                    "UART: Complete message received: '{}'",
+                                    message.as_str()
+                                );
 
                                 // Store message
                                 let mut last_msg = last_message.lock().unwrap();
@@ -520,7 +548,9 @@ impl GpioMtuTimerV2 {
 
                                 // Signal message completion to main task (like nRF line 619)
                                 message_complete.store(true, Ordering::Relaxed);
-                                log::info!("UART: Message complete signal sent, exiting framing task");
+                                log::info!(
+                                    "UART: Message complete signal sent, exiting framing task"
+                                );
 
                                 received_chars.clear();
                                 break; // Exit task after receiving complete message (like nRF)

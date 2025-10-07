@@ -34,7 +34,9 @@ impl<'d> Terminal<'d> {
     }
 
     pub fn write_str(&mut self, s: &str) -> Result<(), CliError> {
-        self.uart_tx.write(s.as_bytes()).map_err(|_| CliError::UartError)?;
+        self.uart_tx
+            .write(s.as_bytes())
+            .map_err(|_| CliError::UartError)?;
         Ok(())
     }
 
@@ -198,7 +200,9 @@ impl<'d> Terminal<'d> {
                         if self.line_buffer.len() < CLI_BUFFER_SIZE - 1 {
                             self.line_buffer.push(ch);
                             self.cursor_pos += 1;
-                            self.uart_tx.write(&[ch as u8]).map_err(|_| CliError::UartError)?;
+                            self.uart_tx
+                                .write(&[ch as u8])
+                                .map_err(|_| CliError::UartError)?;
                         }
                     }
                     // Add a space after completion
@@ -292,7 +296,7 @@ impl<'d> Terminal<'d> {
         }
     }
 
-    fn replace_current_line(&mut self, new_line: &String) -> Result<(), CliError> {
+    fn replace_current_line(&mut self, new_line: &str) -> Result<(), CliError> {
         // Clear current line
         for _ in 0..self.cursor_pos {
             self.write_str("\x08 \x08")?;
@@ -331,7 +335,9 @@ impl<'d> Terminal<'d> {
             self.line_buffer.push(ch);
             self.cursor_pos += 1;
             // Echo the character
-            self.uart_tx.write(&[ch as u8]).map_err(|_| CliError::UartError)?;
+            self.uart_tx
+                .write(&[ch as u8])
+                .map_err(|_| CliError::UartError)?;
         } else {
             // Complex case: inserting in middle - need to rebuild string
             self.line_buffer.insert(self.cursor_pos, ch);

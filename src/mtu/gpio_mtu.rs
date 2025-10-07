@@ -87,6 +87,7 @@ impl GpioMtu {
     }
 
     // Helper method to evaluate and record a message result
+    #[allow(dead_code)]
     fn record_message_result(&self, received_message: Option<String<256>>) -> bool {
         let mut config = self.config.lock().unwrap();
         let expected = config.expected_message.clone();
@@ -137,7 +138,6 @@ impl GpioMtu {
         let config = self.config.lock().unwrap();
         let power_up_delay_ms = config.power_up_delay_ms;
         let bit_duration_micros = config.bit_duration_micros();
-        let framing = config.framing;
         drop(config);
 
         log::info!("MTU: Starting meter reading for {} seconds", duration_secs);
@@ -159,8 +159,7 @@ impl GpioMtu {
         let mut delay = FreeRtos;
 
         // Main MTU operation loop
-        while self.running.load(Ordering::Relaxed)
-            && start_time.elapsed().as_secs() < duration_secs
+        while self.running.load(Ordering::Relaxed) && start_time.elapsed().as_secs() < duration_secs
         {
             clock_cycle_count += 1;
 

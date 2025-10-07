@@ -1,8 +1,8 @@
 use super::config::MtuConfig;
 use super::error::{MtuError, MtuResult};
-use core::sync::atomic::{AtomicBool, AtomicUsize, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use esp_idf_hal::gpio::{Input, Output, PinDriver};
-use esp_idf_hal::timer::{TimerDriver, config::Config as TimerConfig, TIMER00};
+use esp_idf_hal::timer::{config::Config as TimerConfig, TimerDriver, TIMER00};
 use heapless::String;
 use std::sync::{Arc, Mutex};
 
@@ -12,6 +12,7 @@ pub struct GpioMtuTimer {
     running: Arc<AtomicBool>,
     clock_cycles: Arc<AtomicUsize>,
     last_bit: Arc<AtomicU8>,
+    #[allow(dead_code)]
     last_message: Mutex<Option<String<256>>>,
 }
 
@@ -38,7 +39,7 @@ impl GpioMtuTimer {
     }
 
     /// Run MTU operation using hardware timer for precise clock generation
-    pub fn run_mtu_operation_with_timer<'a, 'b, P1, P2>(
+    pub fn run_mtu_operation_with_timer<'a, P1, P2>(
         &self,
         clock_pin: &mut PinDriver<'a, P1, Output>,
         data_pin: &mut PinDriver<'a, P2, Input>,
@@ -54,7 +55,10 @@ impl GpioMtuTimer {
         let power_up_delay_ms = config.power_up_delay_ms;
         drop(config);
 
-        log::info!("MTU: Starting timer-based operation for {} seconds", duration_secs);
+        log::info!(
+            "MTU: Starting timer-based operation for {} seconds",
+            duration_secs
+        );
         log::info!("MTU: Baud rate: {} Hz", baud_rate);
 
         // Power up sequence
@@ -78,34 +82,46 @@ impl GpioMtuTimer {
             let alarm_ticks = timer.tick_hz() / timer_freq_hz as u64;
 
             log::info!("MTU: Timer tick rate: {} Hz", timer.tick_hz());
-            log::info!("MTU: Alarm every {} ticks ({} Hz)", alarm_ticks, timer_freq_hz);
+            log::info!(
+                "MTU: Alarm every {} ticks ({} Hz)",
+                alarm_ticks,
+                timer_freq_hz
+            );
 
-            timer.set_alarm(alarm_ticks).map_err(|_| MtuError::GpioError)?;
+            timer
+                .set_alarm(alarm_ticks)
+                .map_err(|_| MtuError::GpioError)?;
 
             // Use subscribe_nonstatic to borrow GPIO pins directly
             // Safety: We ensure timer doesn't outlive the borrowed pins
             unsafe {
-                timer.subscribe_nonstatic(|| {
-                    let cycle = self.clock_cycles.fetch_add(1, Ordering::Relaxed);
-                    let is_high = cycle % 2 == 0;
+                timer
+                    .subscribe_nonstatic(|| {
+                        let cycle = self.clock_cycles.fetch_add(1, Ordering::Relaxed);
+                        let is_high = cycle % 2 == 0;
 
-                    if is_high {
-                        // Clock HIGH phase - sample data at this point
-                        let _ = clock_pin.set_high();
-                        let data_val = data_pin.is_high();
-                        self.last_bit.store(if data_val { 1 } else { 0 }, Ordering::Relaxed);
-                    } else {
-                        // Clock LOW phase
-                        let _ = clock_pin.set_low();
-                    }
-                }).map_err(|_| MtuError::GpioError)?;
+                        if is_high {
+                            // Clock HIGH phase - sample data at this point
+                            let _ = clock_pin.set_high();
+                            let data_val = data_pin.is_high();
+                            self.last_bit
+                                .store(if data_val { 1 } else { 0 }, Ordering::Relaxed);
+                        } else {
+                            // Clock LOW phase
+                            let _ = clock_pin.set_low();
+                        }
+                    })
+                    .map_err(|_| MtuError::GpioError)?;
             }
 
             timer.enable_interrupt().map_err(|_| MtuError::GpioError)?;
             timer.enable_alarm(true).map_err(|_| MtuError::GpioError)?;
             timer.enable(true).map_err(|_| MtuError::GpioError)?;
 
-            log::info!("MTU: Timer started, running for {} seconds...", duration_secs);
+            log::info!(
+                "MTU: Timer started, running for {} seconds...",
+                duration_secs
+            );
 
             // Wait for duration
             let start = std::time::Instant::now();
@@ -142,7 +158,10 @@ impl GpioMtuTimer {
         clock_pin.set_high().map_err(|_| MtuError::GpioError)?;
 
         let total_cycles = self.clock_cycles.load(Ordering::Relaxed);
-        log::info!("MTU: Timer operation completed - {} total cycles", total_cycles);
+        log::info!(
+            "MTU: Timer operation completed - {} total cycles",
+            total_cycles
+        );
 
         Ok(())
     }

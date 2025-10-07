@@ -3,8 +3,8 @@ use esp32_water_meter::mtu::{GpioMtuTimerV2, MtuConfig};
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::gpio::{Input, Output, PinDriver};
 use esp_idf_hal::peripherals::Peripherals;
-use esp_idf_hal::uart::{UartDriver, config::Config as UartConfig};
-use esp_idf_svc::sys as sys;
+use esp_idf_hal::uart::{config::Config as UartConfig, UartDriver};
+use esp_idf_svc::sys;
 use std::sync::Arc;
 
 fn main() -> anyhow::Result<()> {
@@ -26,8 +26,8 @@ fn main() -> anyhow::Result<()> {
     let uart_config = UartConfig::new().baudrate(115200.into());
     let mut uart = UartDriver::new(
         peripherals.uart0,
-        peripherals.pins.gpio1,  // TX (U0TXD)
-        peripherals.pins.gpio3,  // RX (U0RXD)
+        peripherals.pins.gpio1, // TX (U0TXD)
+        peripherals.pins.gpio3, // RX (U0RXD)
         Option::<esp_idf_hal::gpio::Gpio0>::None,
         Option::<esp_idf_hal::gpio::Gpio0>::None,
         &uart_config,
@@ -53,12 +53,10 @@ fn main() -> anyhow::Result<()> {
 
     // SAFETY: We need 'static lifetime for pins to move into background thread
     // The pins will be owned by the MTU thread for the entire program lifetime
-    let clock_pin_static: PinDriver<'static, esp_idf_hal::gpio::Gpio4, Output> = unsafe {
-        core::mem::transmute(clock_pin)
-    };
-    let data_pin_static: PinDriver<'static, esp_idf_hal::gpio::Gpio5, Input> = unsafe {
-        core::mem::transmute(data_pin)
-    };
+    let clock_pin_static: PinDriver<'static, esp_idf_hal::gpio::Gpio4, Output> =
+        unsafe { core::mem::transmute(clock_pin) };
+    let data_pin_static: PinDriver<'static, esp_idf_hal::gpio::Gpio5, Input> =
+        unsafe { core::mem::transmute(data_pin) };
 
     // Get timer peripheral for MTU
     let timer = peripherals.timer00;

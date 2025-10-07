@@ -98,7 +98,9 @@ impl CommandHandler {
                             response.push_str("MTU is already running. Use 'mtu_stop' first.");
                         } else {
                             // Send start command to MTU thread
-                            match sender.send(MtuCommand::Start { duration_secs: duration_secs.into() }) {
+                            match sender.send(MtuCommand::Start {
+                                duration_secs: duration_secs.into(),
+                            }) {
                                 Ok(_) => {
                                     response.push_str(&format!(
                                         "MTU operation started for {} seconds",
@@ -106,7 +108,8 @@ impl CommandHandler {
                                     ));
                                 }
                                 Err(_) => {
-                                    response.push_str("Error: Failed to send command to MTU thread");
+                                    response
+                                        .push_str("Error: Failed to send command to MTU thread");
                                 }
                             }
                         }
@@ -128,7 +131,8 @@ impl CommandHandler {
                                     response.push_str("MTU stop signal sent");
                                 }
                                 Err(_) => {
-                                    response.push_str("Error: Failed to send command to MTU thread");
+                                    response
+                                        .push_str("Error: Failed to send command to MTU thread");
                                 }
                             }
                         } else {
@@ -149,8 +153,14 @@ impl CommandHandler {
                     let total_reads = successful + corrupted;
 
                     response.push_str("MTU Status:\r\n");
-                    response.push_str(&format!("  State: {}\r\n",
-                        if mtu.is_running() { "Running" } else { "Stopped" }));
+                    response.push_str(&format!(
+                        "  State: {}\r\n",
+                        if mtu.is_running() {
+                            "Running"
+                        } else {
+                            "Stopped"
+                        }
+                    ));
                     response.push_str(&format!("  Baud rate: {} bps\r\n", baud_rate));
                     response.push_str("  Pins: GPIO4 (clock), GPIO5 (data)\r\n");
                     response.push_str(&format!("  Total cycles: {}\r\n", cycles));

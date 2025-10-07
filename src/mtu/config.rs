@@ -65,8 +65,8 @@ impl Default for MtuConfig {
         );
 
         Self {
-            baud_rate: 1200,               // Default to 1200 baud
-            power_up_delay_ms: 10,         // Very short delay to be ready before meter starts
+            baud_rate: 1200,       // Default to 1200 baud
+            power_up_delay_ms: 10, // Very short delay to be ready before meter starts
             bit_timeout_ms: 2000,
             runtime_secs: 30,
             framing: UartFraming::SevenE1, // Sensus Standard default

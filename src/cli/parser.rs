@@ -61,7 +61,9 @@ impl CommandParser {
                         if duration > 0 && duration <= 300 {
                             CliCommand::MtuStart(Some(duration))
                         } else {
-                            CliCommand::Unknown("mtu_start: duration must be 1-300 seconds".to_string())
+                            CliCommand::Unknown(
+                                "mtu_start: duration must be 1-300 seconds".to_string(),
+                            )
                         }
                     } else {
                         CliCommand::Unknown("mtu_start: invalid duration".to_string())
@@ -93,9 +95,7 @@ impl CommandParser {
                 CliCommand::Echo(echo_string)
             }
             "mtu_reset" => CliCommand::MtuReset,
-            _ => {
-                CliCommand::Unknown(cmd.to_string())
-            }
+            _ => CliCommand::Unknown(cmd.to_string()),
         }
     }
 }
