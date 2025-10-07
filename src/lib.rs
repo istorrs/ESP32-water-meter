@@ -4,6 +4,8 @@
 
 pub mod mtu;
 pub mod meter;
+pub mod cli;
 
-pub use mtu::{MtuConfig, MtuError, MtuResult, GpioMtu, GpioMtuTimer, GpioMtuTimerV2, UartFraming};
+pub use mtu::{MtuConfig, MtuError, MtuResult, GpioMtu, GpioMtuTimer, GpioMtuTimerV2, MtuCommand, UartFraming};
 pub use meter::{MeterConfig, MeterType, MeterHandler};
+pub use cli::{CliCommand, CliError, CommandHandler, CommandParser, Terminal};

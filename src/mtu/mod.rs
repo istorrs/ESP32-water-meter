@@ -10,5 +10,5 @@ pub use config::UartFraming;
 pub use error::{MtuError, MtuResult};
 pub use gpio_mtu::GpioMtu;
 pub use gpio_mtu_timer::GpioMtuTimer;
-pub use gpio_mtu_timer_v2::GpioMtuTimerV2;
+pub use gpio_mtu_timer_v2::{GpioMtuTimerV2, MtuCommand};
 pub use uart_framing::{extract_char_from_frame, UartFrame};

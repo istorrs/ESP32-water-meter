@@ -1,0 +1,50 @@
+pub mod commands;
+pub mod parser;
+pub mod terminal;
+
+pub use commands::CommandHandler;
+pub use parser::CommandParser;
+pub use terminal::Terminal;
+
+// CLI-related types and constants
+pub const CLI_BUFFER_SIZE: usize = 128;
+pub const MAX_HISTORY_SIZE: usize = 10;
+
+#[derive(Debug, Clone)]
+pub enum CliCommand {
+    Help,
+    Version,
+    Status,
+    Uptime,
+    Clear,
+    Reset,
+    Echo(String),
+    MtuStart(Option<u16>), // Optional duration in seconds
+    MtuStop,
+    MtuStatus,
+    MtuBaud(u32),        // Set MTU baud rate
+    MtuReset,            // Reset MTU statistics
+    Empty,
+    Unknown(String),
+}
+
+#[derive(Debug)]
+pub enum CliError {
+    InvalidCommand,
+    InvalidArgument,
+    UartError,
+    BufferFull,
+}
+
+impl std::fmt::Display for CliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            CliError::InvalidCommand => write!(f, "Invalid command"),
+            CliError::InvalidArgument => write!(f, "Invalid argument"),
+            CliError::UartError => write!(f, "UART error"),
+            CliError::BufferFull => write!(f, "Buffer full"),
+        }
+    }
+}
+
+impl std::error::Error for CliError {}
