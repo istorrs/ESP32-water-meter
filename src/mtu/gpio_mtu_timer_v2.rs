@@ -398,15 +398,36 @@ impl GpioMtuTimerV2 {
             (handled_count as f32 / total_cycles as f32) * 100.0
         );
 
+        // Update statistics based on message reception
+        let mut config = self.config.lock().unwrap();
         if let Some(msg) = received_message {
             log::info!("  Received message: '{}'", msg.as_str());
 
             // Store in our internal state
             let mut last_msg = self.last_message.lock().unwrap();
             *last_msg = Some(msg);
+
+            // Increment successful reads counter
+            config.successful_reads += 1;
+            log::info!(
+                "MTU: Statistics updated - Successful: {}, Corrupted: {}, Success rate: {:.1}%",
+                config.successful_reads,
+                config.corrupted_reads,
+                (config.successful_reads as f32 / (config.successful_reads + config.corrupted_reads) as f32) * 100.0
+            );
         } else {
             log::info!("  No complete message received");
+
+            // Increment corrupted reads counter
+            config.corrupted_reads += 1;
+            log::warn!(
+                "MTU: Statistics updated - Successful: {}, Corrupted: {}, Success rate: {:.1}%",
+                config.successful_reads,
+                config.corrupted_reads,
+                (config.successful_reads as f32 / (config.successful_reads + config.corrupted_reads) as f32) * 100.0
+            );
         }
+        drop(config);
 
         Ok(())
     }
