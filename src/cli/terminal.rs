@@ -252,6 +252,25 @@ impl<'d> Terminal<'d> {
         Ok(())
     }
 
+    pub fn show_meter_help(&mut self) -> Result<(), CliError> {
+        self.write_line("Available commands:")?;
+        self.write_line("  help        - Show this help")?;
+        self.write_line("  version     - Show firmware version")?;
+        self.write_line("  status      - Show meter status and statistics")?;
+        self.write_line("  uptime      - Show system uptime")?;
+        self.write_line("  clear       - Clear terminal")?;
+        self.write_line("  reset       - Reset system")?;
+        self.write_line("  enable      - Enable meter response to clock signals")?;
+        self.write_line("  disable     - Disable meter response")?;
+        self.write_line("  type <sensus|neptune> - Set meter type (7E1 or 7E2)")?;
+        self.write_line("  message <text> - Set response message (\\r added automatically)")?;
+        self.write_line("")?;
+        self.write_line("Use TAB to autocomplete commands")?;
+        self.write_line("Use UP/DOWN arrows to navigate command history")?;
+        self.write_line("Use LEFT/RIGHT arrows to move cursor and edit")?;
+        Ok(())
+    }
+
     fn handle_history_up(&mut self) -> Result<(), CliError> {
         if self.command_history.is_empty() {
             return Ok(());

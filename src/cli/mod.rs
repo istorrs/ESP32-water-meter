@@ -2,9 +2,17 @@ pub mod commands;
 pub mod parser;
 pub mod terminal;
 
+// Meter CLI modules
+pub mod meter_commands;
+pub mod meter_parser;
+
 pub use commands::CommandHandler;
 pub use parser::CommandParser;
 pub use terminal::Terminal;
+
+// Meter CLI exports
+pub use meter_commands::MeterCommandHandler;
+pub use meter_parser::{MeterCommand, MeterCommandParser};
 
 // CLI-related types and constants
 pub const CLI_BUFFER_SIZE: usize = 128;

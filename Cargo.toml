@@ -4,7 +4,16 @@ version = "0.1.0"
 authors = ["Water Meter Team"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "ESP32 water meter MTU interface with ESP-IDF"
+description = "ESP32 water meter MTU interface and simulator with ESP-IDF"
+
+# Multiple binaries - flash one or the other
+[[bin]]
+name = "mtu_app"
+path = "src/main.rs"
+
+[[bin]]
+name = "meter_app"
+path = "src/bin/meter_app.rs"
 
 [dependencies]
 # ESP-IDF (std approach - mature for ESP32)

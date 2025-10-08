@@ -413,7 +413,9 @@ impl GpioMtuTimerV2 {
                 "MTU: Statistics updated - Successful: {}, Corrupted: {}, Success rate: {:.1}%",
                 config.successful_reads,
                 config.corrupted_reads,
-                (config.successful_reads as f32 / (config.successful_reads + config.corrupted_reads) as f32) * 100.0
+                (config.successful_reads as f32
+                    / (config.successful_reads + config.corrupted_reads) as f32)
+                    * 100.0
             );
         } else {
             log::info!("  No complete message received");
@@ -424,7 +426,9 @@ impl GpioMtuTimerV2 {
                 "MTU: Statistics updated - Successful: {}, Corrupted: {}, Success rate: {:.1}%",
                 config.successful_reads,
                 config.corrupted_reads,
-                (config.successful_reads as f32 / (config.successful_reads + config.corrupted_reads) as f32) * 100.0
+                (config.successful_reads as f32
+                    / (config.successful_reads + config.corrupted_reads) as f32)
+                    * 100.0
             );
         }
         drop(config);
