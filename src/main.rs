@@ -40,9 +40,9 @@ fn main() -> anyhow::Result<()> {
     const MQTT_PUBLISH_TOPIC: &str = "istorrs/mtu/data";
     const MQTT_CONTROL_TOPIC: &str = "istorrs/mtu/control";
 
-    // Initialize WiFi (optional - comment out if WiFi not needed)
+    // Initialize WiFi manager but don't connect yet (on-demand connection)
     let wifi = if WIFI_SSID != "YOUR_SSID" {
-        log::info!("🌐 Initializing WiFi...");
+        log::info!("🌐 Initializing WiFi manager (on-demand mode)...");
         log::info!("  SSID: {}", WIFI_SSID);
         log::info!("  Password length: {} chars", WIFI_PASSWORD.len());
 
@@ -53,8 +53,15 @@ fn main() -> anyhow::Result<()> {
             WIFI_SSID,
             WIFI_PASSWORD,
         ) {
-            Ok(wifi) => {
-                log::info!("✅ WiFi initialization successful");
+            Ok(mut wifi) => {
+                log::info!("✅ WiFi manager created");
+
+                // Disconnect immediately for on-demand usage
+                log::info!("🔌 Disconnecting WiFi (will reconnect on-demand for MQTT publish)");
+                if let Err(e) = wifi.disconnect() {
+                    log::warn!("⚠️  WiFi disconnect failed: {:?}", e);
+                }
+
                 Some(Arc::new(Mutex::new(wifi)))
             }
             Err(e) => {
@@ -127,29 +134,83 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("✅ MTU background thread spawned");
 
-    // Initialize MQTT (optional - requires WiFi)
-    // Note: MQTT is initialized after MTU so the callback can access MTU command sender
-    let mqtt = if wifi.is_some() {
-        log::info!("Initializing MQTT client...");
+    // MQTT will be created on-demand when publishing data
+    log::info!("📡 MQTT: On-demand mode (will connect only when publishing)");
 
-        // Clone the MTU command sender for MQTT callback
-        let mqtt_mtu_sender = mtu_cmd_sender.clone();
+    // Initialize CLI components
+    let mut terminal = Terminal::new(uart_tx, uart_rx);
+    let mut command_handler = CommandHandler::new().with_mtu(Arc::clone(&mtu), mtu_cmd_sender.clone());
 
-        match MqttClient::new(
+    // Add WiFi to command handler if available
+    if let Some(ref wifi_manager) = wifi {
+        command_handler = command_handler.with_wifi(Arc::clone(wifi_manager));
+    }
+
+    log::info!("✅ CLI initialized");
+
+    // Send welcome message
+    terminal.write_line("")?;
+    terminal.write_line("ESP32 Water Meter MTU Interface")?;
+    terminal.write_line("Type 'help' for available commands")?;
+    terminal.write_line("Use TAB for command autocompletion")?;
+    terminal.write_line("MTU Clock: GPIO4 | Data: GPIO5")?;
+
+    // Show WiFi/MQTT status in welcome message
+    if wifi.is_some() {
+        terminal.write_line("WiFi: On-demand (disconnected)")?;
+        terminal.write_line("MQTT: On-demand (will connect after MTU read)")?;
+    }
+    terminal.print_prompt()?;
+
+    log::info!("Entering CLI loop...");
+
+    // Helper function to publish MTU data with on-demand WiFi/MQTT connection
+    // This function connects WiFi, creates MQTT client, publishes data,
+    // waits for downlink messages, then disconnects everything
+    let publish_with_connectivity = |wifi_manager: &Arc<Mutex<WifiManager>>,
+                                      mtu_sender: &std::sync::mpsc::Sender<MtuCommand>,
+                                      message: &str,
+                                      stats: (u32, u32, usize),
+                                      baud_rate: u32,
+                                      counter: &mut u32| {
+        let (successful, corrupted, cycles) = stats;
+
+        log::info!("📡 On-demand publish: Connecting WiFi...");
+
+        // Step 1: Connect WiFi
+        let wifi_result = if let Ok(mut wifi_guard) = wifi_manager.lock() {
+            wifi_guard.reconnect(None, None)
+        } else {
+            log::error!("❌ Failed to lock WiFi manager");
+            return;
+        };
+
+        if let Err(e) = wifi_result {
+            log::error!("❌ WiFi connection failed: {:?}", e);
+            return;
+        }
+
+        log::info!("✅ WiFi connected");
+
+        // Step 2: Create MQTT client with message handler for control topic
+        log::info!("📡 Creating MQTT client...");
+
+        // Clone MTU sender for MQTT callback
+        let mqtt_mtu_sender = mtu_sender.clone();
+
+        let mqtt_client = match MqttClient::new(
             MQTT_BROKER,
             MQTT_CLIENT_ID,
             Arc::new(move |topic, data| {
-                if let Ok(message) = std::str::from_utf8(data) {
-                    log::info!("MQTT message on {}: {}", topic, message);
+                if let Ok(msg) = std::str::from_utf8(data) {
+                    log::info!("📩 MQTT control message on {}: {}", topic, msg);
 
-                    // Handle control messages
                     if topic == MQTT_CONTROL_TOPIC {
-                        let cmd = message.trim().to_lowercase();
+                        let cmd = msg.trim().to_lowercase();
                         match cmd.as_str() {
                             "start" => {
                                 log::info!("MQTT: Starting MTU (30s default)");
-                                let _ =
-                                    mqtt_mtu_sender.send(MtuCommand::Start { duration_secs: 30 });
+                                let _ = mqtt_mtu_sender.send(MtuCommand::Start { duration_secs: 30 });
                             }
                             msg if msg.starts_with("start ") => {
                                 if let Some(duration_str) = msg.strip_prefix("start ") {
@@ -170,98 +231,99 @@ fn main() -> anyhow::Result<()> {
                             }
                         }
                     }
-                } else {
-                    log::warn!("MQTT: Received non-UTF8 data on {}", topic);
                 }
             }),
         ) {
-            Ok(client) => {
-                log::info!("MQTT client created, waiting for connection...");
-
-                // Spawn a thread to wait for connection then subscribe
-                let client_clone = Arc::new(client);
-                let subscribe_client = Arc::clone(&client_clone);
-                std::thread::spawn(move || {
-                    log::info!("MQTT subscription thread started, waiting for connection...");
-                    // Wait up to 10 seconds for connection
-                    for i in 0..20 {
-                        if subscribe_client.is_connected() {
-                            log::info!("MQTT connected! Subscribing to control topic...");
-                            match subscribe_client.subscribe(MQTT_CONTROL_TOPIC, QoS::AtLeastOnce) {
-                                Ok(_) => log::info!(
-                                    "✅ Subscribed to control topic: {}",
-                                    MQTT_CONTROL_TOPIC
-                                ),
-                                Err(e) => {
-                                    log::warn!("❌ Failed to subscribe to control topic: {:?}", e)
-                                }
-                            }
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                        if i % 4 == 0 {
-                            log::info!("Waiting for MQTT connection... ({}s)", i / 2);
-                        }
-                    }
-                    if !subscribe_client.is_connected() {
-                        log::warn!("❌ MQTT connection timeout - subscription failed");
-                    }
-                });
-
-                Some(client_clone)
-            }
+            Ok(client) => client,
             Err(e) => {
-                log::warn!("❌ MQTT initialization failed: {:?}", e);
-                log::warn!("Continuing without MQTT...");
-                None
+                log::error!("❌ MQTT client creation failed: {:?}", e);
+                // Disconnect WiFi before returning
+                if let Ok(mut wifi_guard) = wifi_manager.lock() {
+                    let _ = wifi_guard.disconnect();
+                }
+                return;
+            }
+        };
+
+        // Step 3: Wait for MQTT connection (up to 10 seconds)
+        log::info!("⏳ Waiting for MQTT connection...");
+        for i in 0..20 {
+            if mqtt_client.is_connected() {
+                log::info!("✅ MQTT connected");
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if i == 19 {
+                log::error!("❌ MQTT connection timeout");
+                // Disconnect WiFi and return
+                if let Ok(mut wifi_guard) = wifi_manager.lock() {
+                    let _ = wifi_guard.disconnect();
+                }
+                return;
             }
         }
-    } else {
-        log::info!("MQTT disabled (requires WiFi)");
-        None
+
+        // Step 4: Subscribe to control topic
+        log::info!("📥 Subscribing to control topic...");
+        if let Err(e) = mqtt_client.subscribe(MQTT_CONTROL_TOPIC, QoS::AtLeastOnce) {
+            log::warn!("⚠️  Failed to subscribe to control topic: {:?}", e);
+        }
+
+        // Step 5: Publish MTU data
+        let payload = serde_json::json!({
+            "message": message,
+            "baud_rate": baud_rate,
+            "cycles": cycles,
+            "successful": successful,
+            "corrupted": corrupted,
+            "count": *counter,
+        });
+
+        if let Ok(json_str) = serde_json::to_string(&payload) {
+            match mqtt_client.publish(
+                MQTT_PUBLISH_TOPIC,
+                json_str.as_bytes(),
+                QoS::AtLeastOnce,
+                false,
+            ) {
+                Ok(_) => {
+                    *counter += 1;
+                    log::info!("📤 Published #{} to {}: {}", *counter, MQTT_PUBLISH_TOPIC, message);
+                }
+                Err(e) => {
+                    log::error!("❌ MQTT publish failed: {:?}", e);
+                }
+            }
+        }
+
+        // Step 6: Wait 5 seconds for queued downlink messages
+        log::info!("⏳ Waiting 5s for queued downlink messages...");
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
+        // Step 7: Drop MQTT client (will disconnect)
+        log::info!("🔌 Disconnecting MQTT...");
+        drop(mqtt_client);
+
+        // Step 8: Disconnect WiFi
+        log::info!("🔌 Disconnecting WiFi...");
+        if let Ok(mut wifi_guard) = wifi_manager.lock() {
+            if let Err(e) = wifi_guard.disconnect() {
+                log::warn!("⚠️  WiFi disconnect failed: {:?}", e);
+            }
+        }
+
+        log::info!("✅ On-demand publish cycle complete");
     };
 
-    // Initialize CLI components
-    let mut terminal = Terminal::new(uart_tx, uart_rx);
-    let mut command_handler = CommandHandler::new().with_mtu(Arc::clone(&mtu), mtu_cmd_sender);
-
-    // Add WiFi and MQTT to command handler if available
-    if let Some(ref wifi_manager) = wifi {
-        command_handler = command_handler.with_wifi(Arc::clone(wifi_manager));
-    }
-    if let Some(ref mqtt_client) = mqtt {
-        command_handler = command_handler.with_mqtt(Arc::clone(mqtt_client));
-    }
-
-    log::info!("✅ CLI initialized");
-
-    // Send welcome message
-    terminal.write_line("")?;
-    terminal.write_line("ESP32 Water Meter MTU Interface")?;
-    terminal.write_line("Type 'help' for available commands")?;
-    terminal.write_line("Use TAB for command autocompletion")?;
-    terminal.write_line("MTU Clock: GPIO4 | Data: GPIO5")?;
-
-    // Show WiFi/MQTT status in welcome message
-    if wifi.is_some() {
-        terminal.write_line("WiFi: Enabled")?;
-    }
-    if mqtt.is_some() {
-        terminal.write_line("MQTT: Enabled")?;
-    }
-    terminal.print_prompt()?;
-
-    log::info!("Entering CLI loop...");
-
-    // Track last published cycle count for MQTT auto-publishing
+    // Track last published cycle count for on-demand publishing
     // Publish based on MTU read cycles, not message content (allows duplicate messages)
     let mut last_published_cycles = 0u64;
     let mut publish_counter = 0u32;
 
     // Main CLI loop
     loop {
-        // Auto-publish MTU data to MQTT if available and new data exists
-        if let Some(ref mqtt_client) = mqtt {
+        // On-demand publish: Connect WiFi/MQTT only when new MTU data is available
+        if wifi.is_some() {
             if let Some(current_message) = mtu.get_last_message() {
                 // Get statistics for the JSON payload
                 let (successful, corrupted, cycles) = mtu.get_stats();
@@ -273,85 +335,19 @@ fn main() -> anyhow::Result<()> {
                 if should_publish {
                     let baud_rate = mtu.get_baud_rate();
 
-                    // Build JSON payload
-                    let payload = serde_json::json!({
-                        "message": current_message.as_str(),
-                        "baud_rate": baud_rate,
-                        "cycles": cycles,
-                        "successful": successful,
-                        "corrupted": corrupted,
-                        "count": publish_counter,
-                    });
+                    // Call on-demand publish function
+                    // This will: connect WiFi → create MQTT → publish → wait for downlink → disconnect
+                    publish_with_connectivity(
+                        wifi.as_ref().unwrap(),
+                        &mtu_cmd_sender,
+                        current_message.as_str(),
+                        (successful, corrupted, cycles),
+                        baud_rate,
+                        &mut publish_counter,
+                    );
 
-                    if let Ok(json_str) = serde_json::to_string(&payload) {
-                        // Check WiFi status before publishing
-                    let wifi_ok = if let Some(ref wifi_manager) = wifi {
-                        wifi_manager
-                            .lock()
-                            .ok()
-                            .and_then(|w| w.is_connected().ok())
-                            .unwrap_or(false)
-                    } else {
-                        true // No WiFi manager means no WiFi check needed
-                    };
-
-                    if !wifi_ok {
-                        log::warn!("❌ WiFi disconnected, skipping MQTT publish");
-                    } else {
-                        match mqtt_client.publish(
-                            MQTT_PUBLISH_TOPIC,
-                            json_str.as_bytes(),
-                            QoS::AtLeastOnce,
-                            false,
-                        ) {
-                            Ok(_) => {
-                                // Only log every 10th successful publish to reduce spam
-                                if publish_counter % 10 == 0 {
-                                    log::info!(
-                                        "📤 Published #{} to {}: {}",
-                                        publish_counter,
-                                        MQTT_PUBLISH_TOPIC,
-                                        current_message.as_str()
-                                    );
-                                }
-                                publish_counter += 1;
-                                last_published_cycles = u64::from(total_reads);
-                            }
-                            Err(e) => {
-                                log::warn!("❌ Failed to publish to MQTT: {:?}", e);
-
-                                // Check if WiFi is still connected
-                                if let Some(ref wifi_manager) = wifi {
-                                    if let Ok(wifi_guard) = wifi_manager.lock() {
-                                        let wifi_connected = wifi_guard.is_connected().unwrap_or(false);
-                                        drop(wifi_guard); // Release lock
-
-                                        if !wifi_connected {
-                                            log::warn!("⚠️  WiFi disconnected - attempting reconnect...");
-
-                                            if let Ok(mut wifi_guard) = wifi_manager.lock() {
-                                                match wifi_guard.reconnect(None, None) {
-                                                    Ok(_) => {
-                                                        log::info!("✅ WiFi reconnected successfully");
-                                                        // Give MQTT client time to reconnect
-                                                        std::thread::sleep(std::time::Duration::from_millis(2000));
-                                                    }
-                                                    Err(e) => {
-                                                        log::error!("❌ WiFi reconnect failed: {:?}", e);
-                                                        log::warn!("⚠️  Use 'wifi_connect' command to manually retry");
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            log::warn!("⚠️  WiFi connected but MQTT publish failed - MQTT will retry");
-                                        }
-                                    }
-                                }
-                                // Don't update last_published_cycles on failure so we retry
-                            }
-                        }
-                    }
-                    }
+                    // Update last published cycle count
+                    last_published_cycles = u64::from(total_reads);
                 }
             }
         }

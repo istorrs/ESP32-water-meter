@@ -137,4 +137,13 @@ impl WifiManager {
             Ok(heapless::String::new())
         }
     }
+
+    pub fn disconnect(&mut self) -> Result<()> {
+        if self.wifi.is_connected().unwrap_or(false) {
+            info!("🔌 WiFi: Disconnecting...");
+            self.wifi.disconnect()?;
+            info!("✅ WiFi: Disconnected");
+        }
+        Ok(())
+    }
 }
