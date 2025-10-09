@@ -244,7 +244,13 @@ impl<'d> Terminal<'d> {
         self.write_line("  mtu_stop    - Stop MTU operation")?;
         self.write_line("  mtu_status  - Show MTU status")?;
         self.write_line("  mtu_baud <rate> - Set MTU baud rate (1-115200, default 1200)")?;
-        self.write_line("  mtu_reset - Reset MTU statistics")?;
+        self.write_line("  mtu_reset   - Reset MTU statistics")?;
+        self.write_line("  wifi_connect [ssid] [password] - Connect to WiFi (no args = default)")?;
+        self.write_line("  wifi_reconnect - Quick reconnect to default WiFi")?;
+        self.write_line("  wifi_status - Show WiFi connection status")?;
+        self.write_line("  mqtt_connect <broker_url> - Connect to MQTT broker")?;
+        self.write_line("  mqtt_status - Show MQTT connection status")?;
+        self.write_line("  mqtt_publish <topic> <message> - Publish MQTT message")?;
         self.write_line("")?;
         self.write_line("Use TAB to autocomplete commands")?;
         self.write_line("Use UP/DOWN arrows to navigate command history")?;

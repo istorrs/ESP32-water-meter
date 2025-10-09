@@ -27,6 +27,12 @@ impl CommandParser {
             "mtu_status",
             "mtu_baud",
             "mtu_reset",
+            "wifi_connect",
+            "wifi_reconnect",
+            "wifi_status",
+            "mqtt_connect",
+            "mqtt_status",
+            "mqtt_publish",
         ]
     }
 
@@ -95,6 +101,33 @@ impl CommandParser {
                 CliCommand::Echo(echo_string)
             }
             "mtu_reset" => CliCommand::MtuReset,
+            "wifi_connect" => {
+                let ssid = parts.next().map(|s| s.to_string());
+                let password = parts.next().map(|s| s.to_string());
+                CliCommand::WifiConnect(ssid, password)
+            }
+            "wifi_reconnect" => CliCommand::WifiReconnect,
+            "wifi_status" => CliCommand::WifiStatus,
+            "mqtt_connect" => {
+                if let Some(broker_url) = parts.next() {
+                    CliCommand::MqttConnect(broker_url.to_string())
+                } else {
+                    CliCommand::Unknown("mqtt_connect: broker URL required".to_string())
+                }
+            }
+            "mqtt_status" => CliCommand::MqttStatus,
+            "mqtt_publish" => {
+                let topic = parts.next().unwrap_or("").to_string();
+                let message_parts: Vec<&str> = parts.collect();
+                let message = message_parts.join(" ");
+                if topic.is_empty() {
+                    CliCommand::Unknown("mqtt_publish: topic required".to_string())
+                } else if message.is_empty() {
+                    CliCommand::Unknown("mqtt_publish: message required".to_string())
+                } else {
+                    CliCommand::MqttPublish(topic, message)
+                }
+            }
             _ => CliCommand::Unknown(cmd.to_string()),
         }
     }

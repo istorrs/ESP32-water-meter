@@ -22,7 +22,7 @@ flash: build
 	@echo "📱 Flashing ESP32 MTU app (debug)..."
 	cargo run --bin mtu_app
 
-# Flash MTU (release)
+# Flash MTU (release) - let cargo handle bootloader/partition table
 flash-release: release
 	@echo "📱 Flashing ESP32 MTU app (release)..."
 	cargo run --bin mtu_app --release
