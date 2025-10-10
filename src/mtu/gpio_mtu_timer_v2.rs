@@ -17,6 +17,8 @@ pub enum MtuCommand {
     Start { duration_secs: u64 },
     /// Stop MTU operation immediately
     Stop,
+    /// Set MTU baud rate (must be stopped to change)
+    SetBaudRate { baud_rate: u32 },
 }
 
 /// MTU implementation using hardware timer ISR -> Task pattern
@@ -166,6 +168,17 @@ impl GpioMtuTimerV2 {
                                 log::info!("MTU: Clock pin set LOW (power off)");
                             }
                         }
+                        Ok(MtuCommand::SetBaudRate { baud_rate }) => {
+                            if mtu.is_running() {
+                                log::warn!("MTU: Cannot change baud rate while MTU is running");
+                            } else if (1..=115200).contains(&baud_rate) {
+                                log::info!("MTU: Setting baud rate to {} bps", baud_rate);
+                                mtu.set_baud_rate(baud_rate);
+                                log::info!("MTU: Baud rate updated to {} bps", baud_rate);
+                            } else {
+                                log::warn!("MTU: Invalid baud rate {} (must be 1-115200)", baud_rate);
+                            }
+                        }
                         Err(_) => {
                             // Channel closed - exit thread
                             log::info!("MTU: Command channel closed, thread exiting");
@@ -221,6 +234,8 @@ impl GpioMtuTimerV2 {
         let uart_message_complete = self.message_complete.clone();
         let uart_last_message = Arc::new(Mutex::new(None::<String<256>>));
         let uart_last_message_clone = uart_last_message.clone();
+        let uart_frame_errors = Arc::new(Mutex::new(0usize));
+        let uart_frame_errors_clone = uart_frame_errors.clone();
 
         let uart_handle = std::thread::Builder::new()
             .stack_size(8192)
@@ -231,6 +246,7 @@ impl GpioMtuTimerV2 {
                     uart_config,
                     bit_receiver,
                     uart_last_message_clone,
+                    uart_frame_errors_clone,
                 );
             })
             .map_err(|_| MtuError::GpioError)?;
@@ -375,8 +391,9 @@ impl GpioMtuTimerV2 {
         log::info!("MTU: Signaling UART framing task to exit...");
         esp_idf_hal::delay::FreeRtos::delay_ms(50);
 
-        // Get the last message from UART task (stored in shared Arc)
+        // Get the last message and frame error count from UART task (stored in shared Arc)
         let received_message = uart_last_message.lock().unwrap().clone();
+        let frame_errors = *uart_frame_errors.lock().unwrap();
 
         // Don't join the UART thread - it may be stuck in ESP-IDF logging
         // The thread will exit on its own when it completes
@@ -400,21 +417,41 @@ impl GpioMtuTimerV2 {
 
         // Update statistics based on message reception
         let mut config = self.config.lock().unwrap();
+
+        // Message is corrupted if we have frame errors OR no message received
+        let is_corrupted = frame_errors > 0 || received_message.is_none();
+
         if let Some(msg) = received_message {
             log::info!("  Received message: '{}'", msg.as_str());
 
-            // Store in our internal state
+            // Store in our internal state (even if corrupted - might be partially useful)
             let mut last_msg = self.last_message.lock().unwrap();
             *last_msg = Some(msg);
 
-            // Increment successful reads counter
-            config.successful_reads += 1;
-            log::info!(
-                "MTU: Statistics updated - Successful: {}, Corrupted: {}, Success rate: {:.1}%",
-                config.successful_reads,
-                config.corrupted_reads,
-                (config.successful_reads as f32 / (config.successful_reads + config.corrupted_reads) as f32) * 100.0
-            );
+            if is_corrupted {
+                // Had frame errors - count as corrupted even though we got a message
+                config.corrupted_reads += 1;
+                log::warn!(
+                    "MTU: Message received but CORRUPTED ({} frame errors) - Successful: {}, Corrupted: {}, Success rate: {:.1}%",
+                    frame_errors,
+                    config.successful_reads,
+                    config.corrupted_reads,
+                    (config.successful_reads as f32
+                        / (config.successful_reads + config.corrupted_reads) as f32)
+                        * 100.0
+                );
+            } else {
+                // Clean message - count as successful
+                config.successful_reads += 1;
+                log::info!(
+                    "MTU: Statistics updated - Successful: {}, Corrupted: {}, Success rate: {:.1}%",
+                    config.successful_reads,
+                    config.corrupted_reads,
+                    (config.successful_reads as f32
+                        / (config.successful_reads + config.corrupted_reads) as f32)
+                        * 100.0
+                );
+            }
         } else {
             log::info!("  No complete message received");
 
@@ -424,7 +461,9 @@ impl GpioMtuTimerV2 {
                 "MTU: Statistics updated - Successful: {}, Corrupted: {}, Success rate: {:.1}%",
                 config.successful_reads,
                 config.corrupted_reads,
-                (config.successful_reads as f32 / (config.successful_reads + config.corrupted_reads) as f32) * 100.0
+                (config.successful_reads as f32
+                    / (config.successful_reads + config.corrupted_reads) as f32)
+                    * 100.0
             );
         }
         drop(config);
@@ -440,6 +479,7 @@ impl GpioMtuTimerV2 {
         config: MtuConfig,
         bit_receiver: Receiver<u8>,
         last_message: Arc<Mutex<Option<String<256>>>>,
+        frame_error_count: Arc<Mutex<usize>>,
     ) {
         log::info!("UART: Framing task started");
 
@@ -601,6 +641,9 @@ impl GpioMtuTimerV2 {
         log::info!("UART: Framing task ending (pre-cleanup)");
         log::info!("  Frames decoded: {}", frames_decoded);
         log::info!("  Frame errors: {}", frame_errors);
+
+        // Store frame error count for main task to check
+        *frame_error_count.lock().unwrap() = frame_errors;
 
         if !received_chars.is_empty() {
             log::warn!("  Partial message: {} chars", received_chars.len());

@@ -4,17 +4,30 @@ version = "0.1.0"
 authors = ["Water Meter Team"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "ESP32 water meter MTU interface with ESP-IDF"
+description = "ESP32 water meter MTU interface and simulator with ESP-IDF"
+
+# Multiple binaries - flash one or the other
+[[bin]]
+name = "mtu_app"
+path = "src/main.rs"
+
+[[bin]]
+name = "meter_app"
+path = "src/bin/meter_app.rs"
 
 [dependencies]
 # ESP-IDF (std approach - mature for ESP32)
-esp-idf-svc = { version = "0.51", default-features = false, features = ["alloc"] }
+esp-idf-svc = { version = "0.51", default-features = false, features = ["alloc", "binstart"] }
 esp-idf-hal = "0.45"
 esp-idf-sys = { version = "0.36" }
 
 # Embedded HAL
 embedded-hal = "0.2"
 embedded-svc = "0.28"
+
+# Networking
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 
 # Utilities
 log = "0.4"
@@ -30,9 +43,10 @@ opt-level = "s"
 
 [profile.release]
 codegen-units = 1
-debug = 2
+debug = 0        # Disable debug symbols to reduce size
 debug-assertions = false
 incremental = false
-lto = 'fat'
-opt-level = 's'
+lto = 'fat'      # Link-time optimization for smaller binary
+opt-level = 's'  # Optimize for size ('z' was too aggressive)
 overflow-checks = false
+# strip = true removed - was stripping ESP-IDF app descriptor!

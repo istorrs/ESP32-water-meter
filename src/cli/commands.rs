@@ -1,13 +1,17 @@
 use super::{CliCommand, CliError};
+use crate::mqtt::MqttClient;
 use crate::mtu::{GpioMtuTimerV2, MtuCommand};
+use crate::wifi::WifiManager;
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub struct CommandHandler {
     start_time: Instant,
     mtu: Option<Arc<GpioMtuTimerV2>>,
     mtu_cmd_sender: Option<Sender<MtuCommand>>,
+    wifi: Option<Arc<Mutex<WifiManager>>>,
+    mqtt: Option<Arc<MqttClient>>,
 }
 
 impl Default for CommandHandler {
@@ -22,12 +26,24 @@ impl CommandHandler {
             start_time: Instant::now(),
             mtu: None,
             mtu_cmd_sender: None,
+            wifi: None,
+            mqtt: None,
         }
     }
 
     pub fn with_mtu(mut self, mtu: Arc<GpioMtuTimerV2>, cmd_sender: Sender<MtuCommand>) -> Self {
         self.mtu = Some(mtu);
         self.mtu_cmd_sender = Some(cmd_sender);
+        self
+    }
+
+    pub fn with_wifi(mut self, wifi: Arc<Mutex<WifiManager>>) -> Self {
+        self.wifi = Some(wifi);
+        self
+    }
+
+    pub fn with_mqtt(mut self, mqtt: Arc<MqttClient>) -> Self {
+        self.mqtt = Some(mqtt);
         self
     }
 
@@ -203,6 +219,158 @@ impl CommandHandler {
                     response.push_str("MTU statistics reset");
                 } else {
                     response.push_str("MTU not configured");
+                }
+            }
+            CliCommand::WifiConnect(ssid, password) => {
+                log::info!("CLI: WiFi connect requested");
+                if let Some(ref wifi) = self.wifi {
+                    let ssid_ref = ssid.as_deref();
+                    let password_ref = password.as_deref();
+
+                    match wifi.lock() {
+                        Ok(mut wifi_guard) => match wifi_guard.reconnect(ssid_ref, password_ref) {
+                            Ok(_) => {
+                                if ssid.is_none() {
+                                    response.push_str("✅ WiFi reconnected to default network");
+                                } else {
+                                    response.push_str(&format!(
+                                        "✅ WiFi connected to: {}",
+                                        ssid.as_ref().unwrap()
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                response.push_str(&format!("❌ WiFi connection failed: {:?}", e));
+                            }
+                        },
+                        Err(_) => {
+                            response.push_str("❌ WiFi manager lock error");
+                        }
+                    }
+                } else {
+                    response.push_str("❌ WiFi not initialized");
+                }
+            }
+            CliCommand::WifiReconnect => {
+                log::info!("CLI: WiFi reconnect requested");
+                if let Some(ref wifi) = self.wifi {
+                    match wifi.lock() {
+                        Ok(mut wifi_guard) => match wifi_guard.reconnect(None, None) {
+                            Ok(_) => {
+                                response.push_str("✅ WiFi reconnected to default network");
+                            }
+                            Err(e) => {
+                                response.push_str(&format!("❌ WiFi reconnect failed: {:?}", e));
+                            }
+                        },
+                        Err(_) => {
+                            response.push_str("❌ WiFi manager lock error");
+                        }
+                    }
+                } else {
+                    response.push_str("❌ WiFi not initialized");
+                }
+            }
+            CliCommand::WifiStatus => {
+                log::info!("CLI: WiFi status requested");
+                if let Some(ref wifi) = self.wifi {
+                    match wifi.lock() {
+                        Ok(wifi_guard) => match wifi_guard.is_connected() {
+                            Ok(connected) => {
+                                if connected {
+                                    if let Ok(ip) = wifi_guard.get_ip() {
+                                        response.push_str(&format!(
+                                            "WiFi Status: Connected\r\nIP: {}",
+                                            ip
+                                        ));
+                                        if let Ok(ssid) = wifi_guard.get_ssid() {
+                                            response
+                                                .push_str(&format!("\r\nSSID: {}", ssid.as_str()));
+                                        }
+                                    } else {
+                                        response.push_str("WiFi Status: Connected (IP unavailable)");
+                                    }
+                                } else {
+                                    response.push_str("WiFi Status: Disconnected");
+                                }
+                            }
+                            Err(_) => {
+                                response.push_str("WiFi Status: Error checking connection");
+                            }
+                        },
+                        Err(_) => {
+                            response.push_str("WiFi Status: Lock error");
+                        }
+                    }
+                } else {
+                    response.push_str("WiFi Status: Not initialized");
+                }
+            }
+            CliCommand::MqttConnect(_broker_url) => {
+                log::info!("CLI: MQTT connect requested");
+                response
+                    .push_str("MQTT connect not available - MQTT must be initialized at startup");
+            }
+            CliCommand::MqttStatus => {
+                log::info!("CLI: MQTT status requested");
+                if let Some(ref mqtt) = self.mqtt {
+                    let status = mqtt.get_status();
+                    let connected = mqtt.is_connected();
+
+                    response.push_str("MQTT Status:\r\n");
+                    response.push_str(&format!(
+                        "  Connection: {}\r\n",
+                        if connected {
+                            "✅ Connected"
+                        } else {
+                            "❌ Disconnected"
+                        }
+                    ));
+                    response.push_str(&format!("  Broker: {}\r\n", status.broker_url));
+                    response.push_str(&format!("  Client ID: {}\r\n", status.client_id));
+
+                    let subs = status.subscriptions.lock().unwrap();
+                    response.push_str(&format!("  Subscriptions ({}):\r\n", subs.len()));
+                    for sub in subs.iter() {
+                        response.push_str(&format!("    - {}\r\n", sub));
+                    }
+
+                    let pub_count = *status.publish_count.lock().unwrap();
+                    let recv_count = *status.receive_count.lock().unwrap();
+                    response.push_str(&format!("  Published: {} messages\r\n", pub_count));
+                    response.push_str(&format!("  Received: {} messages\r\n", recv_count));
+
+                    let last_pub = status.last_published_topic.lock().unwrap();
+                    if !last_pub.is_empty() {
+                        response.push_str(&format!("  Last published: {}\r\n", last_pub));
+                    }
+
+                    let last_recv_topic = status.last_received_topic.lock().unwrap();
+                    let last_recv_msg = status.last_received_message.lock().unwrap();
+                    if !last_recv_topic.is_empty() {
+                        response.push_str(&format!(
+                            "  Last received: {} = {}",
+                            last_recv_topic, last_recv_msg
+                        ));
+                    }
+                } else {
+                    response.push_str("MQTT Status: Not initialized");
+                }
+            }
+            CliCommand::MqttPublish(topic, message) => {
+                log::info!("CLI: MQTT publish requested to topic: {}", topic);
+                if let Some(ref mqtt) = self.mqtt {
+                    use esp_idf_svc::mqtt::client::QoS;
+                    match mqtt.publish(&topic, message.as_bytes(), QoS::AtLeastOnce, false) {
+                        Ok(_) => {
+                            response.push_str(&format!("Published to {}: {}", topic, message));
+                        }
+                        Err(e) => {
+                            response.push_str(&format!("MQTT publish failed: {:?}", e));
+                        }
+                    }
+                } else {
+                    response.push_str("MQTT not initialized");
                 }
             }
             CliCommand::Unknown(cmd) => {

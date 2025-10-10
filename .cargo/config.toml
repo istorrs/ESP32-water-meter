@@ -3,6 +3,7 @@ target = "xtensa-esp32-espidf"
 
 [target.xtensa-esp32-espidf]
 linker = "ldproxy"
+# Default monitor baud - espflash uses optimal flash speed automatically
 runner = "espflash flash --monitor"
 
 [unstable]
