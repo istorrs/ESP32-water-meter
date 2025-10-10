@@ -12,13 +12,18 @@ The ESP32 operates at **3.3V logic levels**, while many water meters use **5V lo
 
 1. **ESP32 Development Board** (with USB-C or Micro USB)
 2. **Bidirectional Level Shifter** (3.3V ↔ 5V)
-   - Recommended: TXS0102 or TXS0104 (Texas Instruments)
-   - Alternative: BSS138-based modules (common on SparkFun/Adafruit boards)
+   - Recommended: **Adafruit TXS0108E** - 8-channel, 1.2V-3.6V to 1.65V-5.5V
+   - Recommended: **TXS0102 or TXS0104** (Texas Instruments) - 2 or 4 channel
+   - Alternative: **SparkFun BOB-12009** - 4-channel BSS138 based
+   - Alternative: Generic BSS138 modules - Cost-effective for 2-4 channels
    - NOT recommended: Simple resistor dividers (unreliable at 1200+ baud)
-3. **Pull-up Resistors** (if not included on level shifter board)
+3. **Current Limiting Resistors** (recommended for protection)
+   - 270Ω resistors on water meter side prevent overcurrent
+   - Protects ESP32 GPIO from voltage spikes and shorts
+4. **Pull-up Resistors** (if not included on level shifter board)
    - 4.7kΩ to 10kΩ on the 5V side of the data line
-4. **Connecting Wires** (short, <30cm recommended)
-5. **Meter Interface Cable** (depends on your meter model)
+5. **Connecting Wires** (short, <30cm recommended, twisted pair for >30cm)
+6. **Meter Interface Cable** (depends on your meter model)
 
 ### For ESP32-to-ESP32 Testing (No Level Shifter)
 
@@ -32,21 +37,26 @@ The ESP32 operates at **3.3V logic levels**, while many water meters use **5V lo
 ESP32 (3.3V)                 Level Shifter              Water Meter (5V)
                              (TXS0102/BSS138)
 
-GPIO4 (Clock) ────> LV1 ─┬─> HV1 ─────────> Clock In
+GPIO4 (Clock) ────> LV1 ─┬─> HV1 ───[270Ω]───> Clock In
                          │
                       [OE to VCC]
                          │
-GPIO5 (Data)  <───> LV2 ─┴─> HV2 <───────── Data Out
-                                                 │
-                                              [4.7kΩ]
-                                                 │
-                                              5V Supply
+GPIO5 (Data)  <───> LV2 ─┴─> HV2 ───[270Ω]───> Data Out
+                                                    │
+                                                 [4.7kΩ]
+                                                    │
+                                                5V Supply
 
-GND ──────────────> GND ─────> GND ─────────> GND
+GND ──────────────> GND ─────> GND ──────────> GND
 
 3.3V ─────────────> VCC_A
 5V Supply ────────> VCC_B
 ```
+
+**Protection Notes**:
+- 270Ω current limiting resistors protect against shorts and overcurrent
+- Pull-up resistor (4.7kΩ) ensures proper idle state (HIGH)
+- Level shifter isolates ESP32 from voltage spikes on meter side
 
 ## Level Shifter Configuration
 
@@ -246,16 +256,28 @@ ESP32 CLI> mtu_status
 ### Corrupted Data
 
 **Check**:
-1. Pull-up resistor on data line (5V side)
-2. Wire length <30cm
-3. Solid ground connection
-4. Clock signal quality (clean edges, no ringing)
+1. Pull-up resistor on data line (5V side) - 4.7kΩ to 10kΩ
+2. Current limiting resistors (270Ω) on meter side
+3. Wire length <30cm (use twisted pair for longer runs)
+4. Solid ground connection (measure resistance <1Ω)
+5. Clock signal quality with oscilloscope (clean edges, no ringing)
+6. Power supply stability (measure voltage under load)
 
-**Try**:
+**Try lower baud rates**:
 ```bash
-ESP32 CLI> mtu_baud 600    # Lower baud rate
+ESP32 CLI> mtu_baud 600    # Try 600 baud
+ESP32 CLI> mtu_start 30
+
+# Or even slower:
+ESP32 CLI> mtu_baud 300    # Try 300 baud
 ESP32 CLI> mtu_start 30
 ```
+
+**Improve signal quality**:
+- Add 270Ω resistors if not present
+- Use shorter wires
+- Check for loose connections
+- Verify level shifter VCC voltages (3.3V and 5V)
 
 ### Intermittent Failures
 
@@ -296,8 +318,41 @@ For monitoring multiple meters with multiple ESP32 devices, see:
 
 Each ESP32 can monitor one meter and publish to the same MQTT broker with unique chip_id identification.
 
+## Additional Hardware Protection (Recommended for Production)
+
+### ESD Protection
+- Add TVS diodes or ESD protection chips on exposed GPIO lines
+- Protects against electrostatic discharge damage
+- Especially important for long cable runs or outdoor installations
+
+### Overcurrent Protection
+- 270Ω series resistors on outputs (as shown in wiring diagram)
+- Limits current to ~12mA at 3.3V (within ESP32 GPIO spec of 40mA max)
+- Prevents damage from accidental shorts
+
+### Power Supply Quality
+- Use regulated power supplies with low ripple
+- Add 100μF bulk capacitor near ESP32 VIN
+- Add 0.1μF ceramic capacitor near 3.3V pin
+- Prevents voltage fluctuations that cause communication errors
+
+### EMI Shielding (for Noisy Environments)
+- Use shielded twisted pair cable for meter connections
+- Connect shield to GND at one end only
+- Keep data and clock lines away from high-power wiring
+
+## Related Documentation
+
+This project is compatible with water meter protocols documented in:
+- [rust_water_meter_mtu](https://github.com/istorrs/rust_water_meter_mtu) - Raspberry Pi MTU emulator
+  - See their [HARDWARE_SETUP.md](/home/rtp-lab/work/github/rust_water_meter_mtu/docs/HARDWARE_SETUP.md) for Raspberry Pi 3.3V GPIO setup
+  - Compatible protocol implementation for cross-platform testing
+
 ## References
 
-- [ESP32 Datasheet](https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf) - GPIO specifications
-- [TXS0102 Datasheet](https://www.ti.com/lit/ds/symlink/txs0102.pdf) - Level shifter specs
+- [ESP32 Datasheet](https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf) - GPIO specifications (40mA max per pin)
+- [TXS0102 Datasheet](https://www.ti.com/lit/ds/symlink/txs0102.pdf) - Texas Instruments level shifter
+- [Adafruit TXS0108E](https://www.adafruit.com/product/395) - 8-channel level shifter
+- [SparkFun BOB-12009](https://www.sparkfun.com/products/12009) - BSS138 level shifter
 - README.md - GPIO pin assignments and testing
+- rust_water_meter_mtu/docs/HARDWARE_SETUP.md - Raspberry Pi equivalent hardware guide
