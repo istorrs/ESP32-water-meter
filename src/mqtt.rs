@@ -131,9 +131,8 @@ impl MqttClient {
                             EventPayload::Subscribed(id) => {
                                 info!("✅ MQTT subscribed (message id: {})", id);
                             }
-                            EventPayload::Published(_id) => {
-                                // Reduce log spam - only log occasionally
-                                // info!("✅ MQTT published (message id: {})", id);
+                            EventPayload::Published(id) => {
+                                info!("✅ MQTT published (message id: {})", id);
                             }
                             EventPayload::Error(e) => {
                                 // Rate limit error logging to reduce spam
