@@ -56,6 +56,7 @@ Both apps feature interactive serial CLI control over UART0 (115200 baud, USB-C 
   - Mode: Floating input (no pull-up/down)
   - Function: Reads serial data from meter response
   - Note: Line driven by meter's output (idle HIGH)
+  - For 5V meters: Connect via level shifter, pull-up on 5V side
 
 ### Meter App
 - **Clock (GPIO4)**:
@@ -69,8 +70,9 @@ Both apps feature interactive serial CLI control over UART0 (115200 baud, USB-C 
   - Initial state: HIGH (UART idle state)
   - Function: Sends serial data to MTU
 
-### Testing Configuration
-Connect two ESP32 devices (no external pull-ups required):
+### ESP32-to-ESP32 Testing Configuration
+
+For testing with two ESP32 boards (no external components required):
 ```
 MTU GPIO4 (output) ──→ Meter GPIO4 (input + interrupt)
 MTU GPIO5 (input)  ←── Meter GPIO5 (output)
@@ -82,6 +84,26 @@ MTU GND            ──── Meter GND
 - Lines are driven by push-pull outputs
 - Direct GPIO-to-GPIO connection works reliably
 - Keep wire length short (<30cm) for clean signals at 1200 baud
+
+### Connecting to Real Water Meters
+
+**For 5V water meters**, you need a bidirectional level shifter:
+
+```
+ESP32 (3.3V) ──> Level Shifter ──> Water Meter (5V)
+  GPIO4 (clock)    TXS0102/BSS138      Clock In
+  GPIO5 (data)                         Data Out
+  GND                                  GND
+```
+
+**⚠️ WARNING**: Never connect 5V signals directly to ESP32 GPIO - use a level shifter!
+
+See [docs/HARDWARE_SETUP.md](docs/HARDWARE_SETUP.md) for:
+- Level shifter wiring diagrams
+- Pull-up resistor requirements
+- Power supply considerations
+- Troubleshooting guide
+- Signal integrity recommendations
 
 ## WiFi/MQTT Configuration (MTU App)
 
