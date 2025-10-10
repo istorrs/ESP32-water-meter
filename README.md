@@ -47,20 +47,41 @@ Both apps feature interactive serial CLI control over UART0 (115200 baud, USB-C 
 - **UART0 (USB-C)**: GPIO1 (TX), GPIO3 (RX) - 115200 baud CLI
 
 ### MTU App
-- **Clock**: GPIO4 (output) - Generates 1200 baud clock
-- **Data**: GPIO5 (input) - Reads meter response
+- **Clock (GPIO4)**:
+  - Mode: Push-pull output
+  - Initial state: LOW (simulates no power to meter)
+  - Function: Generates 1200 baud clock signal for meter
+
+- **Data (GPIO5)**:
+  - Mode: Floating input (no pull-up/down)
+  - Function: Reads serial data from meter response
+  - Note: Line driven by meter's output (idle HIGH)
 
 ### Meter App
-- **Clock**: GPIO4 (input with interrupt) - Detects MTU clock
-- **Data**: GPIO5 (output, idle HIGH) - Sends response to MTU
+- **Clock (GPIO4)**:
+  - Mode: Floating input (no pull-up/down)
+  - Interrupt: Rising edge
+  - Function: Detects MTU clock pulses
+  - Note: Line driven by MTU's output
+
+- **Data (GPIO5)**:
+  - Mode: Push-pull output
+  - Initial state: HIGH (UART idle state)
+  - Function: Sends serial data to MTU
 
 ### Testing Configuration
-Connect two ESP32 devices:
+Connect two ESP32 devices (no external pull-ups required):
 ```
-MTU GPIO4 (clock out) ──→ Meter GPIO4 (clock in)
-MTU GPIO5 (data in)  ←── Meter GPIO5 (data out)
-MTU GND              ──── Meter GND
+MTU GPIO4 (output) ──→ Meter GPIO4 (input + interrupt)
+MTU GPIO5 (input)  ←── Meter GPIO5 (output)
+MTU GND            ──── Meter GND
 ```
+
+**Notes**:
+- No external pull-up/pull-down resistors needed
+- Lines are driven by push-pull outputs
+- Direct GPIO-to-GPIO connection works reliably
+- Keep wire length short (<30cm) for clean signals at 1200 baud
 
 ## WiFi/MQTT Configuration (MTU App)
 
