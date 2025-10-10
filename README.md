@@ -23,6 +23,10 @@ Both apps feature interactive serial CLI control over UART0 (115200 baud, USB-C 
 - Automatic idle line synchronization for reliable message capture
 - Early exit on complete message reception
 - Message validation with parity checking and statistics
+- **On-demand WiFi/MQTT**: Connects only when publishing data (50-76% power savings)
+- **Per-device MQTT control**: Device-specific and broadcast control topics
+- **Remote configuration**: Change baud rate, trigger reads via MQTT
+- **Device identification**: Unique chip_id, WiFi MAC, and IP in every message
 
 ### Meter App Features
 - GPIO interrupt-based clock detection (rising edge)
@@ -57,6 +61,47 @@ MTU GPIO4 (clock out) ──→ Meter GPIO4 (clock in)
 MTU GPIO5 (data in)  ←── Meter GPIO5 (data out)
 MTU GND              ──── Meter GND
 ```
+
+## WiFi/MQTT Configuration (MTU App)
+
+The MTU app supports on-demand WiFi/MQTT connectivity for remote monitoring and control.
+
+### Configuration
+
+Edit `src/main.rs` WiFi and MQTT credentials:
+
+```rust
+// WiFi Configuration
+const WIFI_SSID: &str = "YOUR_SSID";
+const WIFI_PASSWORD: &str = "YOUR_PASSWORD";
+
+// MQTT Configuration
+const MQTT_BROKER: &str = "mqtt://test.mosquitto.org:1883";
+const MQTT_PUBLISH_TOPIC: &str = "istorrs/mtu/data";
+const MQTT_CONTROL_TOPIC_SHARED: &str = "istorrs/mtu/control";
+```
+
+### On-Demand Mode
+
+WiFi/MQTT operates in **on-demand mode**:
+1. Disconnected by default while idle
+2. After MTU read: Connects WiFi → MQTT
+3. Subscribes to control topics (receives configuration)
+4. Publishes meter data with device identification
+5. Waits 5s for queued downlink messages
+6. Disconnects MQTT → WiFi
+
+**Power savings**: 50-76% compared to always-on WiFi/MQTT
+
+### MQTT Topics
+
+Each device subscribes to TWO control topics:
+- **Shared**: `istorrs/mtu/control` (broadcast commands)
+- **Device-specific**: `istorrs/mtu/{chip_id}/control` (per-device config)
+
+Publishes data to: `istorrs/mtu/data` (with chip_id in payload)
+
+See [docs/mqtt-control.md](docs/mqtt-control.md) for complete MQTT documentation.
 
 ## Prerequisites
 
@@ -132,6 +177,11 @@ Available commands:
   mtu_status       - Show MTU status and statistics
   mtu_baud <rate>  - Set MTU baud rate (1-115200, default 1200)
   mtu_reset        - Reset MTU statistics
+
+  wifi_connect [ssid] [password] - Connect to WiFi
+  wifi_reconnect   - Quick reconnect to default WiFi
+  wifi_status      - Show WiFi connection status
+  mqtt_status      - Show MQTT connection status (on-demand mode)
 ```
 
 ### Meter App Commands
@@ -178,6 +228,38 @@ ESP32 CLI> mtu_baud 2400
 
 # Start 60 second operation
 ESP32 CLI> mtu_start 60
+
+# Check WiFi status
+ESP32 CLI> wifi_status
+WiFi Status: Disconnected
+
+# After MTU read completes, WiFi connects automatically to publish data
+# Then disconnects (on-demand mode)
+```
+
+### MQTT Remote Control
+
+Send commands and configuration via MQTT (while ESP32 is listening):
+
+```bash
+# Set baud rate (persists across reconnects with retain flag)
+mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/control" \
+  -m '{"baud_rate":1200}' -q 1 -r
+
+# Trigger MTU read remotely
+mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/control" \
+  -m '{"command":"start","duration":60}' -q 1
+
+# Stop MTU operation
+mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/control" \
+  -m '{"command":"stop"}' -q 1
+
+# Monitor meter data (with device identification)
+mosquitto_sub -h test.mosquitto.org -t "istorrs/mtu/data"
+```
+
+See [docs/mqtt-control.md](docs/mqtt-control.md) for complete MQTT documentation including per-device topics.
+
 ```
 
 #### Meter App
@@ -215,6 +297,9 @@ ESP32 CLI> disable
   - Receives commands via `mpsc::channel`
   - Spawns per-operation UART framing task
   - Reusable timer ISR for unlimited operations
+- **MQTT Thread**: Created on-demand for each publish cycle
+  - Connection handler thread for event processing
+  - Graceful shutdown prevents reconnect errors
 
 #### Operation Flow
 1. Power-up sequence (clock HIGH, 10ms delay)
@@ -225,6 +310,13 @@ ESP32 CLI> disable
 6. Validates parity and stop bit, extracts ASCII characters
 7. Exits early on carriage return (`\r`) or timeout
 8. Clock pin set LOW to simulate no power to meter
+9. **On-demand publish** (if WiFi configured):
+   - Connect WiFi (~2-5s)
+   - Create MQTT client and subscribe to control topics
+   - Publish meter data with device identification (chip_id, wifi_mac, wifi_ip)
+   - Wait 5s for queued downlink messages (baud rate config, start/stop commands)
+   - Gracefully shutdown MQTT connection handler
+   - Disconnect WiFi
 
 #### Technical Details
 - **Timer ISR → Task Pattern**: Hardware timer ISR for precise timing, FreeRTOS task for GPIO
