@@ -300,8 +300,10 @@ fn main() -> anyhow::Result<()> {
         log::info!("⏳ Waiting 5s for queued downlink messages...");
         std::thread::sleep(std::time::Duration::from_secs(5));
 
-        // Step 7: Drop MQTT client (will disconnect)
-        log::info!("🔌 Disconnecting MQTT...");
+        // Step 7: Signal MQTT connection handler to shutdown (prevents errors/retries)
+        mqtt_client.shutdown();
+
+        // Drop the client (connection handler already exited cleanly)
         drop(mqtt_client);
 
         // Step 8: Disconnect WiFi

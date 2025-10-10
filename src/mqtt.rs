@@ -11,6 +11,7 @@ pub struct MqttStatus {
     pub broker_url: String,
     pub client_id: String,
     pub connected: Arc<AtomicBool>,
+    pub shutdown: Arc<AtomicBool>,  // Signal to stop connection handler thread
     pub last_published_topic: Arc<Mutex<String>>,
     pub last_received_topic: Arc<Mutex<String>>,
     pub last_received_message: Arc<Mutex<String>>,
@@ -25,6 +26,7 @@ impl Default for MqttStatus {
             broker_url: String::new(),
             client_id: String::new(),
             connected: Arc::new(AtomicBool::new(false)),
+            shutdown: Arc::new(AtomicBool::new(false)),
             last_published_topic: Arc::new(Mutex::new(String::new())),
             last_received_topic: Arc::new(Mutex::new(String::new())),
             last_received_message: Arc::new(Mutex::new(String::new())),
@@ -79,6 +81,12 @@ impl MqttClient {
                 let mut last_error_log_time = std::time::Instant::now();
 
                 loop {
+                    // Check if we've been signaled to shut down
+                    if status_clone.shutdown.load(Ordering::Relaxed) {
+                        info!("🔌 MQTT connection handler received shutdown signal, exiting cleanly");
+                        break;
+                    }
+
                     match connection.next() {
                         Ok(event) => match event.payload() {
                             EventPayload::Connected(session_present) => {
@@ -90,8 +98,11 @@ impl MqttClient {
                                 consecutive_errors = 0; // Reset error counter on success
                             }
                             EventPayload::Disconnected => {
-                                warn!("❌ MQTT disconnected from broker");
+                                info!("🔌 MQTT disconnected from broker");
                                 status_clone.connected.store(false, Ordering::Relaxed);
+                                // In on-demand mode, disconnect is intentional - exit thread
+                                info!("🔌 MQTT connection handler exiting (clean disconnect)");
+                                break;
                             }
                             EventPayload::Received {
                                 topic: Some(topic_str),
@@ -240,5 +251,15 @@ impl MqttClient {
 
         info!("MQTT unsubscribed from topic: '{}'", topic);
         Ok(())
+    }
+
+    pub fn shutdown(&self) {
+        info!("🔌 MQTT: Signaling connection handler to shutdown...");
+        self.status.shutdown.store(true, Ordering::Relaxed);
+        self.status.connected.store(false, Ordering::Relaxed);
+
+        // Give the thread a moment to see the shutdown signal and exit
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        info!("✅ MQTT: Shutdown signal sent");
     }
 }
