@@ -38,6 +38,10 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("✅ ESP32 initialized with ESP-IDF");
 
+    // Get unique chip ID for device-specific MQTT topics
+    let chip_id = get_chip_id();
+    log::info!("📟 Chip ID: {}", chip_id);
+
     // Initialize system event loop and NVS for WiFi
     let sysloop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
@@ -48,9 +52,17 @@ fn main() -> anyhow::Result<()> {
 
     // MQTT Configuration - Mosquitto public test broker
     const MQTT_BROKER: &str = "mqtt://test.mosquitto.org:1883";
-    const MQTT_CLIENT_ID: &str = "esp32-mtu-istorrs";
     const MQTT_PUBLISH_TOPIC: &str = "istorrs/mtu/data";
-    const MQTT_CONTROL_TOPIC: &str = "istorrs/mtu/control";
+    const MQTT_CONTROL_TOPIC_SHARED: &str = "istorrs/mtu/control"; // Shared topic for broadcast commands
+
+    // Device-specific MQTT topics based on chip ID
+    let mqtt_client_id = format!("esp32-mtu-{}", chip_id.replace(":", ""));
+    let mqtt_control_topic_device = format!("istorrs/mtu/{}/control", chip_id);
+
+    log::info!("📡 MQTT Client ID: {}", mqtt_client_id);
+    log::info!("📡 MQTT Control Topics:");
+    log::info!("   Shared:  {}", MQTT_CONTROL_TOPIC_SHARED);
+    log::info!("   Device:  {}", mqtt_control_topic_device);
 
     // Initialize WiFi manager but don't connect yet (on-demand connection)
     let wifi = if WIFI_SSID != "YOUR_SSID" {
@@ -184,7 +196,10 @@ fn main() -> anyhow::Result<()> {
                                       message: &str,
                                       stats: (u32, u32, usize),
                                       baud_rate: u32,
-                                      counter: &mut u32| {
+                                      counter: &mut u32,
+                                      control_shared: &str,
+                                      control_device: &str,
+                                      client_id: &str| {
         let (successful, corrupted, cycles) = stats;
 
         log::info!("📡 On-demand publish: Connecting WiFi...");
@@ -210,14 +225,19 @@ fn main() -> anyhow::Result<()> {
         // Clone MTU sender for MQTT callback
         let mqtt_mtu_sender = mtu_sender.clone();
 
+        // Clone control topics for callback
+        let callback_control_shared = control_shared.to_string();
+        let callback_control_device = control_device.to_string();
+
         let mqtt_client = match MqttClient::new(
             MQTT_BROKER,
-            MQTT_CLIENT_ID,
+            client_id,
             Arc::new(move |topic, data| {
                 if let Ok(msg) = std::str::from_utf8(data) {
                     log::info!("📩 MQTT control message on {}: {}", topic, msg);
 
-                    if topic == MQTT_CONTROL_TOPIC {
+                    // Accept commands from both shared and device-specific topics
+                    if topic == callback_control_shared || topic == callback_control_device {
                         // Try to parse as JSON first
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(msg) {
                             // Handle JSON messages like {"baud_rate": 1200}
@@ -305,10 +325,15 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        // Step 4: Subscribe to control topic
-        log::info!("📥 Subscribing to control topic...");
-        if let Err(e) = mqtt_client.subscribe(MQTT_CONTROL_TOPIC, QoS::AtLeastOnce) {
-            log::warn!("⚠️  Failed to subscribe to control topic: {:?}", e);
+        // Step 4: Subscribe to control topics (both shared and device-specific)
+        log::info!("📥 Subscribing to shared control topic: {}", control_shared);
+        if let Err(e) = mqtt_client.subscribe(control_shared, QoS::AtLeastOnce) {
+            log::warn!("⚠️  Failed to subscribe to shared control topic: {:?}", e);
+        }
+
+        log::info!("📥 Subscribing to device control topic: {}", control_device);
+        if let Err(e) = mqtt_client.subscribe(control_device, QoS::AtLeastOnce) {
+            log::warn!("⚠️  Failed to subscribe to device control topic: {:?}", e);
         }
 
         // Step 5: Publish MTU data with device identification
@@ -401,6 +426,9 @@ fn main() -> anyhow::Result<()> {
                         (successful, corrupted, cycles),
                         baud_rate,
                         &mut publish_counter,
+                        MQTT_CONTROL_TOPIC_SHARED,
+                        &mqtt_control_topic_device,
+                        &mqtt_client_id,
                     );
 
                     // Update last published cycle count
