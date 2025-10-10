@@ -4,8 +4,15 @@ The ESP32 water meter MTU interface supports remote control and configuration vi
 
 ## Topics
 
-- **Control Topic**: `istorrs/mtu/control` (subscribe - receive commands)
-- **Data Topic**: `istorrs/mtu/data` (publish - send meter readings)
+Each ESP32 subscribes to TWO control topics:
+
+- **Shared Control Topic**: `istorrs/mtu/control` (broadcast commands to all devices)
+- **Device Control Topic**: `istorrs/mtu/{chip_id}/control` (commands for specific device)
+- **Data Topic**: `istorrs/mtu/data` (published by all devices with chip_id in payload)
+
+Example for device with chip_id `24:0a:c4:12:34:56`:
+- Subscribes to: `istorrs/mtu/control` AND `istorrs/mtu/24:0a:c4:12:34:56/control`
+- Publishes to: `istorrs/mtu/data`
 
 ## Data Payload Format
 
@@ -46,10 +53,18 @@ JSON messages provide a structured way to send configuration and commands.
 
 #### Set Baud Rate
 
-Configure the MTU baud rate (persists across ESP32 reconnects when using `retain`):
+Configure the MTU baud rate (persists across ESP32 reconnects when using `retain`).
 
+**Broadcast to all devices**:
 ```bash
 mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/control" \
+  -m '{"baud_rate":1200}' -q 1 -r
+```
+
+**Send to specific device** (recommended for multi-device setups):
+```bash
+# Replace chip_id with your device's chip_id
+mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/24:0a:c4:12:34:56/control" \
   -m '{"baud_rate":1200}' -q 1 -r
 ```
 
@@ -59,13 +74,21 @@ mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/control" \
 - Use **QoS 1** (`-q 1`) for reliable delivery
 - Use **retain** (`-r`) so the configuration persists and is delivered to ESP32 on every connect
 - Baud rate can only be changed when MTU is stopped
+- Device-specific topics prevent accidentally changing all devices
 
 #### Start MTU with Duration
 
-Start the MTU for a specific duration:
+Start the MTU for a specific duration.
 
+**Broadcast** (all devices start):
 ```bash
 mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/control" \
+  -m '{"command":"start","duration":60}' -q 1
+```
+
+**Specific device**:
+```bash
+mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/24:0a:c4:12:34:56/control" \
   -m '{"command":"start","duration":60}' -q 1
 ```
 
@@ -73,10 +96,17 @@ Duration is in seconds (default: 30s if not specified).
 
 #### Stop MTU
 
-Stop the currently running MTU operation:
+Stop the currently running MTU operation.
 
+**Broadcast** (all devices stop):
 ```bash
 mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/control" \
+  -m '{"command":"stop"}' -q 1
+```
+
+**Specific device**:
+```bash
+mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/24:0a:c4:12:34:56/control" \
   -m '{"command":"stop"}' -q 1
 ```
 
@@ -149,6 +179,57 @@ This means:
 - **Retained messages** are received on every publish cycle
 - **Non-retained messages** sent while offline are only delivered if QoS 1+ (queued by broker)
 - Configuration changes apply before the **next** MTU read
+
+## Topic Strategy
+
+### Shared vs Device-Specific Topics
+
+**Shared Topic** (`istorrs/mtu/control`):
+- ✅ Use for broadcast commands (all devices respond)
+- ✅ Good for emergency stop, synchronized operations
+- ⚠️ Retained messages affect ALL devices on connect
+
+**Device-Specific Topic** (`istorrs/mtu/{chip_id}/control`):
+- ✅ Use for per-device configuration (baud rate, etc.)
+- ✅ Retained messages only affect the specific device
+- ✅ Prevents accidental configuration of wrong device
+- ✅ Required for multi-device deployments
+
+### Multi-Device Strategy
+
+If you have multiple ESP32s reading different meters:
+
+1. **Get each device's chip_id** from data messages
+2. **Set device-specific baud rates**:
+   ```bash
+   # Device A - Sensus meter at 1200 baud
+   mosquitto_pub -h test.mosquitto.org \
+     -t "istorrs/mtu/24:0a:c4:aa:bb:cc/control" \
+     -m '{"baud_rate":1200}' -q 1 -r
+
+   # Device B - Neptune meter at 9600 baud
+   mosquitto_pub -h test.mosquitto.org \
+     -t "istorrs/mtu/24:0a:c4:dd:ee:ff/control" \
+     -m '{"baud_rate":9600}' -q 1 -r
+   ```
+
+3. **Trigger reads individually or all at once**:
+   ```bash
+   # Start all devices
+   mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/control" \
+     -m '{"command":"start","duration":30}' -q 1
+
+   # Or start specific device
+   mosquitto_pub -h test.mosquitto.org \
+     -t "istorrs/mtu/24:0a:c4:aa:bb:cc/control" \
+     -m '{"command":"start","duration":30}' -q 1
+   ```
+
+4. **Filter data by device**:
+   ```bash
+   mosquitto_sub -h test.mosquitto.org -t "istorrs/mtu/data" | \
+     jq 'select(.chip_id == "24:0a:c4:aa:bb:cc")'
+   ```
 
 ## Example Workflow
 
@@ -235,17 +316,18 @@ mosquitto_sub -h test.mosquitto.org -t "istorrs/mtu/data" | \
 
 ### Send Control to Specific Device
 
-Use device-specific topics for multi-device setups:
+Each device subscribes to its own device-specific topic:
 
 ```bash
-# Device-specific topic format: istorrs/mtu/{chip_id}/control
+# Get chip_id from data payload, then send device-specific command
 mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/24:0a:c4:12:34:56/control" \
   -m '{"baud_rate":1200}' -q 1 -r
 ```
 
-**Note**: Current implementation uses a single shared control topic. For production
-multi-device deployments, modify the code to subscribe to device-specific topics
-using the chip_id.
+**Best practices**:
+- Use device-specific topics when you have multiple ESP32s
+- Use shared topic only for broadcast commands (restart all, etc.)
+- Retained messages on device-specific topics won't affect other devices
 
 ## Troubleshooting
 
