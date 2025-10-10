@@ -12,6 +12,18 @@ use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys;
 use std::sync::{Arc, Mutex};
 
+/// Get ESP32 base MAC address (chip ID) as a hex string
+fn get_chip_id() -> String {
+    let mut mac = [0u8; 6];
+    unsafe {
+        sys::esp_efuse_mac_get_default(mac.as_mut_ptr());
+    }
+    format!(
+        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+    )
+}
+
 fn main() -> anyhow::Result<()> {
     // Initialize ESP-IDF system services
     sys::link_patches();
@@ -299,8 +311,21 @@ fn main() -> anyhow::Result<()> {
             log::warn!("⚠️  Failed to subscribe to control topic: {:?}", e);
         }
 
-        // Step 5: Publish MTU data
+        // Step 5: Publish MTU data with device identification
+        // Get device identifiers
+        let chip_id = get_chip_id();
+        let (wifi_mac, wifi_ip) = if let Ok(wifi_guard) = wifi_manager.lock() {
+            let mac = wifi_guard.get_mac().unwrap_or_else(|_| "unknown".to_string());
+            let ip = wifi_guard.get_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "unknown".to_string());
+            (mac, ip)
+        } else {
+            ("unknown".to_string(), "unknown".to_string())
+        };
+
         let payload = serde_json::json!({
+            "chip_id": chip_id,
+            "wifi_mac": wifi_mac,
+            "wifi_ip": wifi_ip,
             "message": message,
             "baud_rate": baud_rate,
             "cycles": cycles,

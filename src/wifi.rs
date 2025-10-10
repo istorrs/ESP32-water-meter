@@ -138,6 +138,14 @@ impl WifiManager {
         }
     }
 
+    pub fn get_mac(&self) -> Result<String> {
+        let mac = self.wifi.wifi().sta_netif().get_mac()?;
+        Ok(format!(
+            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+        ))
+    }
+
     pub fn disconnect(&mut self) -> Result<()> {
         if self.wifi.is_connected().unwrap_or(false) {
             info!("🔌 WiFi: Disconnecting...");
