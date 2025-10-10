@@ -146,6 +146,18 @@ impl MqttClient {
                             status_clone.connected.store(false, Ordering::Relaxed);
                             consecutive_errors += 1;
 
+                            // Check if this is an INVALID_STATE error (client intentionally disconnected)
+                            // If so, exit the thread gracefully after a few attempts
+                            let error_str = format!("{:?}", e);
+                            let is_invalid_state = error_str.contains("INVALID_STATE");
+
+                            if is_invalid_state && consecutive_errors >= 3 {
+                                // Client was intentionally disconnected (on-demand mode)
+                                // Exit thread gracefully instead of continuing to retry
+                                info!("🔌 MQTT connection handler exiting (client disconnected)");
+                                break;
+                            }
+
                             // Exponential backoff: 1s, 2s, 5s, 10s, 30s, then 60s max
                             let backoff_secs = match consecutive_errors {
                                 1 => 1,
@@ -156,13 +168,16 @@ impl MqttClient {
                                 _ => 60,
                             };
 
-                            // Rate limit error logging
-                            if consecutive_errors <= 3 || last_error_log_time.elapsed().as_secs() >= 30 {
-                                warn!(
-                                    "❌ MQTT connection error (#{}, retry in {}s): {:?}",
-                                    consecutive_errors, backoff_secs, e
-                                );
-                                last_error_log_time = std::time::Instant::now();
+                            // Don't log INVALID_STATE errors (expected in on-demand mode)
+                            // Rate limit other errors
+                            if !is_invalid_state {
+                                if consecutive_errors <= 3 || last_error_log_time.elapsed().as_secs() >= 30 {
+                                    warn!(
+                                        "❌ MQTT connection error (#{}, retry in {}s): {:?}",
+                                        consecutive_errors, backoff_secs, e
+                                    );
+                                    last_error_log_time = std::time::Instant::now();
+                                }
                             }
 
                             std::thread::sleep(std::time::Duration::from_secs(backoff_secs));
