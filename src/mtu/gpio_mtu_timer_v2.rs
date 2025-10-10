@@ -17,6 +17,8 @@ pub enum MtuCommand {
     Start { duration_secs: u64 },
     /// Stop MTU operation immediately
     Stop,
+    /// Set MTU baud rate (must be stopped to change)
+    SetBaudRate { baud_rate: u32 },
 }
 
 /// MTU implementation using hardware timer ISR -> Task pattern
@@ -164,6 +166,17 @@ impl GpioMtuTimerV2 {
                                 log::error!("MTU: Failed to set clock pin LOW: {:?}", e);
                             } else {
                                 log::info!("MTU: Clock pin set LOW (power off)");
+                            }
+                        }
+                        Ok(MtuCommand::SetBaudRate { baud_rate }) => {
+                            if mtu.is_running() {
+                                log::warn!("MTU: Cannot change baud rate while MTU is running");
+                            } else if (1..=115200).contains(&baud_rate) {
+                                log::info!("MTU: Setting baud rate to {} bps", baud_rate);
+                                mtu.set_baud_rate(baud_rate);
+                                log::info!("MTU: Baud rate updated to {} bps", baud_rate);
+                            } else {
+                                log::warn!("MTU: Invalid baud rate {} (must be 1-115200)", baud_rate);
                             }
                         }
                         Err(_) => {

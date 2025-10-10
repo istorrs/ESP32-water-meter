@@ -206,28 +206,58 @@ fn main() -> anyhow::Result<()> {
                     log::info!("📩 MQTT control message on {}: {}", topic, msg);
 
                     if topic == MQTT_CONTROL_TOPIC {
-                        let cmd = msg.trim().to_lowercase();
-                        match cmd.as_str() {
-                            "start" => {
-                                log::info!("MQTT: Starting MTU (30s default)");
-                                let _ = mqtt_mtu_sender.send(MtuCommand::Start { duration_secs: 30 });
+                        // Try to parse as JSON first
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(msg) {
+                            // Handle JSON messages like {"baud_rate": 1200}
+                            if let Some(baud_rate) = json.get("baud_rate").and_then(|v| v.as_u64()) {
+                                log::info!("MQTT: Setting baud rate to {} bps", baud_rate);
+                                let _ = mqtt_mtu_sender.send(MtuCommand::SetBaudRate {
+                                    baud_rate: baud_rate as u32,
+                                });
                             }
-                            msg if msg.starts_with("start ") => {
-                                if let Some(duration_str) = msg.strip_prefix("start ") {
-                                    if let Ok(duration) = duration_str.parse::<u64>() {
+                            if let Some(cmd) = json.get("command").and_then(|v| v.as_str()) {
+                                match cmd {
+                                    "start" => {
+                                        let duration = json.get("duration").and_then(|v| v.as_u64()).unwrap_or(30);
                                         log::info!("MQTT: Starting MTU for {}s", duration);
                                         let _ = mqtt_mtu_sender.send(MtuCommand::Start {
                                             duration_secs: duration,
                                         });
                                     }
+                                    "stop" => {
+                                        log::info!("MQTT: Stopping MTU");
+                                        let _ = mqtt_mtu_sender.send(MtuCommand::Stop);
+                                    }
+                                    _ => {
+                                        log::warn!("MQTT: Unknown JSON command: {}", cmd);
+                                    }
                                 }
                             }
-                            "stop" => {
-                                log::info!("MQTT: Stopping MTU");
-                                let _ = mqtt_mtu_sender.send(MtuCommand::Stop);
-                            }
-                            _ => {
-                                log::warn!("MQTT: Unknown control command: {}", cmd);
+                        } else {
+                            // Fall back to plain text commands for backwards compatibility
+                            let cmd = msg.trim().to_lowercase();
+                            match cmd.as_str() {
+                                "start" => {
+                                    log::info!("MQTT: Starting MTU (30s default)");
+                                    let _ = mqtt_mtu_sender.send(MtuCommand::Start { duration_secs: 30 });
+                                }
+                                msg if msg.starts_with("start ") => {
+                                    if let Some(duration_str) = msg.strip_prefix("start ") {
+                                        if let Ok(duration) = duration_str.parse::<u64>() {
+                                            log::info!("MQTT: Starting MTU for {}s", duration);
+                                            let _ = mqtt_mtu_sender.send(MtuCommand::Start {
+                                                duration_secs: duration,
+                                            });
+                                        }
+                                    }
+                                }
+                                "stop" => {
+                                    log::info!("MQTT: Stopping MTU");
+                                    let _ = mqtt_mtu_sender.send(MtuCommand::Stop);
+                                }
+                                _ => {
+                                    log::warn!("MQTT: Unknown control command: {}", cmd);
+                                }
                             }
                         }
                     }
