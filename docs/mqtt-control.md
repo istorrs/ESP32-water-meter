@@ -2,10 +2,41 @@
 
 The ESP32 water meter MTU interface supports remote control and configuration via MQTT messages on the control topic.
 
-## Topic
+## Topics
 
-- **Control Topic**: `istorrs/mtu/control`
-- **Data Topic**: `istorrs/mtu/data` (published by ESP32)
+- **Control Topic**: `istorrs/mtu/control` (subscribe - receive commands)
+- **Data Topic**: `istorrs/mtu/data` (publish - send meter readings)
+
+## Data Payload Format
+
+Each meter reading published to `istorrs/mtu/data` includes device identification:
+
+```json
+{
+  "chip_id": "24:0a:c4:12:34:56",
+  "wifi_mac": "24:0a:c4:12:34:57",
+  "wifi_ip": "192.168.1.119",
+  "message": "V;RB00000200;IB61564400;A1000;Z3214;XT0746;MT0683;RR00000000;GX000000;GN000000",
+  "baud_rate": 1200,
+  "cycles": 15,
+  "successful": 2,
+  "corrupted": 0,
+  "count": 5
+}
+```
+
+**Device Identification Fields**:
+- `chip_id` - ESP32 base MAC address from eFuse (unique identifier, persists across reboots)
+- `wifi_mac` - WiFi station MAC address (may differ from chip_id)
+- `wifi_ip` - Current IP address assigned by DHCP
+
+**Meter Data Fields**:
+- `message` - Raw meter response string
+- `baud_rate` - Current MTU baud rate setting
+- `cycles` - Total clock cycles sent
+- `successful` - Number of successful reads
+- `corrupted` - Number of corrupted reads (frame errors)
+- `count` - Sequential message counter
 
 ## Message Formats
 
@@ -166,19 +197,55 @@ mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/control" \
 
 The new rate will be applied on the next connection (next meter read).
 
-## Monitoring Control Messages
+## Monitoring Messages
 
-Subscribe to see all control messages:
+### Subscribe to Control Messages
+
+See all control commands being sent:
 
 ```bash
 mosquitto_sub -h test.mosquitto.org -t "istorrs/mtu/control" -v
 ```
 
-Subscribe to see meter data:
+### Subscribe to Meter Data
+
+See all meter readings with device identification:
 
 ```bash
 mosquitto_sub -h test.mosquitto.org -t "istorrs/mtu/data" -v
 ```
+
+### Filter by Device
+
+If you have multiple ESP32 devices, filter by chip ID using `jq`:
+
+```bash
+# Subscribe and filter for specific device
+mosquitto_sub -h test.mosquitto.org -t "istorrs/mtu/data" | \
+  jq 'select(.chip_id == "24:0a:c4:12:34:56")'
+
+# Extract just the meter message
+mosquitto_sub -h test.mosquitto.org -t "istorrs/mtu/data" | \
+  jq -r '.message'
+
+# Show device summary
+mosquitto_sub -h test.mosquitto.org -t "istorrs/mtu/data" | \
+  jq '{chip_id, ip: .wifi_ip, message: .message, baud: .baud_rate}'
+```
+
+### Send Control to Specific Device
+
+Use device-specific topics for multi-device setups:
+
+```bash
+# Device-specific topic format: istorrs/mtu/{chip_id}/control
+mosquitto_pub -h test.mosquitto.org -t "istorrs/mtu/24:0a:c4:12:34:56/control" \
+  -m '{"baud_rate":1200}' -q 1 -r
+```
+
+**Note**: Current implementation uses a single shared control topic. For production
+multi-device deployments, modify the code to subscribe to device-specific topics
+using the chip_id.
 
 ## Troubleshooting
 
