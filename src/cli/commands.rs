@@ -288,7 +288,8 @@ impl CommandHandler {
                                                 .push_str(&format!("\r\nSSID: {}", ssid.as_str()));
                                         }
                                     } else {
-                                        response.push_str("WiFi Status: Connected (IP unavailable)");
+                                        response
+                                            .push_str("WiFi Status: Connected (IP unavailable)");
                                     }
                                 } else {
                                     response.push_str("WiFi Status: Disconnected");

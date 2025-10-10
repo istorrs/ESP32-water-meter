@@ -91,7 +91,9 @@ fn main() -> anyhow::Result<()> {
             Err(e) => {
                 log::error!("❌ WiFi initialization failed: {:?}", e);
                 log::warn!("⚠️  Continuing without WiFi - use 'wifi_connect' command to retry");
-                log::warn!("⚠️  Note: WiFi requires modem peripheral which is consumed on first init");
+                log::warn!(
+                    "⚠️  Note: WiFi requires modem peripheral which is consumed on first init"
+                );
                 log::warn!("⚠️  Recommendation: Fix WiFi credentials and reboot");
                 None
             }
@@ -163,7 +165,8 @@ fn main() -> anyhow::Result<()> {
 
     // Initialize CLI components
     let mut terminal = Terminal::new(uart_tx, uart_rx);
-    let mut command_handler = CommandHandler::new().with_mtu(Arc::clone(&mtu), mtu_cmd_sender.clone());
+    let mut command_handler =
+        CommandHandler::new().with_mtu(Arc::clone(&mtu), mtu_cmd_sender.clone());
 
     // Add WiFi to command handler if available
     if let Some(ref wifi_manager) = wifi {
@@ -192,14 +195,14 @@ fn main() -> anyhow::Result<()> {
     // This function connects WiFi, creates MQTT client, publishes data,
     // waits for downlink messages, then disconnects everything
     let publish_with_connectivity = |wifi_manager: &Arc<Mutex<WifiManager>>,
-                                      mtu_sender: &std::sync::mpsc::Sender<MtuCommand>,
-                                      message: &str,
-                                      stats: (u32, u32, usize),
-                                      baud_rate: u32,
-                                      counter: &mut u32,
-                                      control_shared: &str,
-                                      control_device: &str,
-                                      client_id: &str| {
+                                     mtu_sender: &std::sync::mpsc::Sender<MtuCommand>,
+                                     message: &str,
+                                     stats: (u32, u32, usize),
+                                     baud_rate: u32,
+                                     counter: &mut u32,
+                                     control_shared: &str,
+                                     control_device: &str,
+                                     client_id: &str| {
         let (successful, corrupted, cycles) = stats;
 
         log::info!("📡 On-demand publish: Connecting WiFi...");
@@ -241,7 +244,8 @@ fn main() -> anyhow::Result<()> {
                         // Try to parse as JSON first
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(msg) {
                             // Handle JSON messages like {"baud_rate": 1200}
-                            if let Some(baud_rate) = json.get("baud_rate").and_then(|v| v.as_u64()) {
+                            if let Some(baud_rate) = json.get("baud_rate").and_then(|v| v.as_u64())
+                            {
                                 log::info!("MQTT: Setting baud rate to {} bps", baud_rate);
                                 let _ = mqtt_mtu_sender.send(MtuCommand::SetBaudRate {
                                     baud_rate: baud_rate as u32,
@@ -250,7 +254,10 @@ fn main() -> anyhow::Result<()> {
                             if let Some(cmd) = json.get("command").and_then(|v| v.as_str()) {
                                 match cmd {
                                     "start" => {
-                                        let duration = json.get("duration").and_then(|v| v.as_u64()).unwrap_or(30);
+                                        let duration = json
+                                            .get("duration")
+                                            .and_then(|v| v.as_u64())
+                                            .unwrap_or(30);
                                         log::info!("MQTT: Starting MTU for {}s", duration);
                                         let _ = mqtt_mtu_sender.send(MtuCommand::Start {
                                             duration_secs: duration,
@@ -271,7 +278,8 @@ fn main() -> anyhow::Result<()> {
                             match cmd.as_str() {
                                 "start" => {
                                     log::info!("MQTT: Starting MTU (30s default)");
-                                    let _ = mqtt_mtu_sender.send(MtuCommand::Start { duration_secs: 30 });
+                                    let _ = mqtt_mtu_sender
+                                        .send(MtuCommand::Start { duration_secs: 30 });
                                 }
                                 msg if msg.starts_with("start ") => {
                                     if let Some(duration_str) = msg.strip_prefix("start ") {
@@ -340,8 +348,13 @@ fn main() -> anyhow::Result<()> {
         // Get device identifiers
         let chip_id = get_chip_id();
         let (wifi_mac, wifi_ip) = if let Ok(wifi_guard) = wifi_manager.lock() {
-            let mac = wifi_guard.get_mac().unwrap_or_else(|_| "unknown".to_string());
-            let ip = wifi_guard.get_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "unknown".to_string());
+            let mac = wifi_guard
+                .get_mac()
+                .unwrap_or_else(|_| "unknown".to_string());
+            let ip = wifi_guard
+                .get_ip()
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
             (mac, ip)
         } else {
             ("unknown".to_string(), "unknown".to_string())
@@ -368,7 +381,12 @@ fn main() -> anyhow::Result<()> {
             ) {
                 Ok(_) => {
                     *counter += 1;
-                    log::info!("📤 Published #{} to {}: {}", *counter, MQTT_PUBLISH_TOPIC, message);
+                    log::info!(
+                        "📤 Published #{} to {}: {}",
+                        *counter,
+                        MQTT_PUBLISH_TOPIC,
+                        message
+                    );
                 }
                 Err(e) => {
                     log::error!("❌ MQTT publish failed: {:?}", e);
@@ -405,7 +423,7 @@ fn main() -> anyhow::Result<()> {
     // Main CLI loop
     loop {
         // On-demand publish: Connect WiFi/MQTT only when new MTU data is available
-        if wifi.is_some() {
+        if let Some(wifi_manager) = &wifi {
             if let Some(current_message) = mtu.get_last_message() {
                 // Get statistics for the JSON payload
                 let (successful, corrupted, cycles) = mtu.get_stats();
@@ -420,7 +438,7 @@ fn main() -> anyhow::Result<()> {
                     // Call on-demand publish function
                     // This will: connect WiFi → create MQTT → publish → wait for downlink → disconnect
                     publish_with_connectivity(
-                        wifi.as_ref().unwrap(),
+                        wifi_manager,
                         &mtu_cmd_sender,
                         current_message.as_str(),
                         (successful, corrupted, cycles),

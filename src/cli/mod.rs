@@ -30,11 +30,11 @@ pub enum CliCommand {
     MtuStart(Option<u16>), // Optional duration in seconds
     MtuStop,
     MtuStatus,
-    MtuBaud(u32),                // Set MTU baud rate
-    MtuReset,                    // Reset MTU statistics
+    MtuBaud(u32),                                // Set MTU baud rate
+    MtuReset,                                    // Reset MTU statistics
     WifiConnect(Option<String>, Option<String>), // ssid, password (None = use default)
     WifiStatus,
-    WifiReconnect, // Reconnect using stored credentials
+    WifiReconnect,       // Reconnect using stored credentials
     MqttConnect(String), // broker_url
     MqttStatus,
     MqttPublish(String, String), // topic, message

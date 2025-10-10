@@ -11,7 +11,7 @@ pub struct MqttStatus {
     pub broker_url: String,
     pub client_id: String,
     pub connected: Arc<AtomicBool>,
-    pub shutdown: Arc<AtomicBool>,  // Signal to stop connection handler thread
+    pub shutdown: Arc<AtomicBool>, // Signal to stop connection handler thread
     pub last_published_topic: Arc<Mutex<String>>,
     pub last_received_topic: Arc<Mutex<String>>,
     pub last_received_message: Arc<Mutex<String>>,
@@ -83,7 +83,9 @@ impl MqttClient {
                 loop {
                     // Check if we've been signaled to shut down
                     if status_clone.shutdown.load(Ordering::Relaxed) {
-                        info!("🔌 MQTT connection handler received shutdown signal, exiting cleanly");
+                        info!(
+                            "🔌 MQTT connection handler received shutdown signal, exiting cleanly"
+                        );
                         break;
                     }
 
@@ -143,7 +145,9 @@ impl MqttClient {
                             }
                             EventPayload::BeforeConnect => {
                                 // Rate limit BeforeConnect logging
-                                if consecutive_errors == 0 || last_error_log_time.elapsed().as_secs() >= 30 {
+                                if consecutive_errors == 0
+                                    || last_error_log_time.elapsed().as_secs() >= 30
+                                {
                                     info!("🔄 MQTT attempting to connect...");
                                     last_error_log_time = std::time::Instant::now();
                                 }
@@ -180,14 +184,15 @@ impl MqttClient {
 
                             // Don't log INVALID_STATE errors (expected in on-demand mode)
                             // Rate limit other errors
-                            if !is_invalid_state {
-                                if consecutive_errors <= 3 || last_error_log_time.elapsed().as_secs() >= 30 {
-                                    warn!(
-                                        "❌ MQTT connection error (#{}, retry in {}s): {:?}",
-                                        consecutive_errors, backoff_secs, e
-                                    );
-                                    last_error_log_time = std::time::Instant::now();
-                                }
+                            if !is_invalid_state
+                                && (consecutive_errors <= 3
+                                    || last_error_log_time.elapsed().as_secs() >= 30)
+                            {
+                                warn!(
+                                    "❌ MQTT connection error (#{}, retry in {}s): {:?}",
+                                    consecutive_errors, backoff_secs, e
+                                );
+                                last_error_log_time = std::time::Instant::now();
                             }
 
                             std::thread::sleep(std::time::Duration::from_secs(backoff_secs));

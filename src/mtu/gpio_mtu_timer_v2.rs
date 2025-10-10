@@ -176,7 +176,10 @@ impl GpioMtuTimerV2 {
                                 mtu.set_baud_rate(baud_rate);
                                 log::info!("MTU: Baud rate updated to {} bps", baud_rate);
                             } else {
-                                log::warn!("MTU: Invalid baud rate {} (must be 1-115200)", baud_rate);
+                                log::warn!(
+                                    "MTU: Invalid baud rate {} (must be 1-115200)",
+                                    baud_rate
+                                );
                             }
                         }
                         Err(_) => {
